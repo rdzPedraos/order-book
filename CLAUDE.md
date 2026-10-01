@@ -1,6 +1,8 @@
 # Vibranium Exchange
 
-Go (Gofr) microservices monorepo. Work follows spec-driven development: specs and plans live in `openspec/`, and the PDR (Product Development Request) in `openspec/PDR/`.
+Go (Gofr) microservices monorepo. Work follows spec-driven development: specs and plans live in `openspec/`.
+
+PDRs (Product Development Requests) live in `docs/PDR/`, one file per product. They are the source of product requirements: read the relevant one before proposing or designing a change.
 
 ## Rules
 
