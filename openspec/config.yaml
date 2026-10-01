@@ -10,17 +10,34 @@ context: |
 
   Tech Stack:
   Backend: Microservices written with Go + Gofr (microservices framework)
-  Frontend: React + Vite + TypeScript + Tailwind CSS
   IaaC: Docker, Kubernetes, Helm
   API Style: RESTful, documented in docs/api.md
-  Testing: Vitest, Go unit test
+  Testing: Go unit test
+
+  Standards (mandatory, source of truth):
+  - CLAUDE.md: TDD and project rules
+  - .claude/standards/architecture.md: monorepo, service layers, modules/
+  - .claude/standards/go.md
+
+  Shared Go packages live in modules/ (not pkg/), only if 2+ services use them and they are stable.
 
 rules:
   proposal:
     - Reference existing patterns before inventing new ones
     - Add tabs tldr, goals, assumptions, concepts tab if needed
+  design:
+    - State the layer and path of each new component (handler, service, store, models, utils, modules)
+    - Justify anything placed in modules/ and any new third-party dependency
+  tasks:
+    - Write behaviour tasks test-first - failing test for the named spec scenarios, then implementation, then refactor
+    - Scaffolding and infra tasks state the command that verifies them
+    - Every scenario in the change's specs is covered by at least one task, named by its scenario title
 
 operations:
   apply:
     guidance:
+      - Follow TDD - write the test, run it and see it fail before implementing
+      - Each spec scenario of the task gets its own test case, named after the scenario, asserting its THEN clauses
       - Run focused tests before the full suite
+      - Keep functions under cyclomatic complexity 10 and non-test files under 300 lines; split by responsibility
+      - A task is done only when its tests pass and gofmt and gocyclo -over 9 report nothing
