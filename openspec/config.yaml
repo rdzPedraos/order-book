@@ -1,0 +1,26 @@
+schema: spec-driven
+
+context: |
+  Language: Spanish
+  All artifacts must be written in Spanish.
+  Keep OpenSpec structural headings in English.
+  Keep the technical terms in English.
+
+  All code must be written in English.
+
+  Tech Stack:
+  Backend: Microservices written with Go + Gofr (microservices framework)
+  Frontend: React + Vite + TypeScript + Tailwind CSS
+  IaaC: Docker, Kubernetes, Helm
+  API Style: RESTful, documented in docs/api.md
+  Testing: Vitest, Go unit test
+
+rules:
+  proposal:
+    - Reference existing patterns before inventing new ones
+    - Add tabs tldr, goals, assumptions, concepts tab if needed
+
+operations:
+  apply:
+    guidance:
+      - Run focused tests before the full suite
