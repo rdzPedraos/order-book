@@ -25,7 +25,8 @@ The message describes the staged changes, nothing else. The conversation history
 5. Write the message in English with the format below.
 6. **Self-check before committing.** For every `What` bullet, name the file and hunk it comes from. Delete any bullet you cannot point to. Check that the type and verbs match the kind of files (step 3). Check that nothing in the message comes only from the conversation.
 7. Run `git commit` with a heredoc.
-8. Do not push unless the user asks. Never amend unless the user asks. If they ask to fix only the message, use `git commit --amend --only` (no paths), so that changes staged after the commit do not get absorbed.
+8. Run `git log -1 --format='%h%n%n%B'` and paste its output verbatim in a `text` code block in your final reply, so the user sees the exact message that was committed. Tool output is not shown to the user, so it must go in the reply.
+9. Do not push unless the user asks. Never amend unless the user asks. If they ask to fix only the message, use `git commit --amend --only` (no paths), so that changes staged after the commit do not get absorbed.
 
 ## Format
 
