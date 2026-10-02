@@ -28,6 +28,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
+	github.com/fzipp/gocyclo v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.10.1 // indirect
@@ -103,3 +104,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	modernc.org/sqlite v1.59.0 // indirect
 )
+
+tool github.com/fzipp/gocyclo/cmd/gocyclo

@@ -15,4 +15,19 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - run: go test ./...
+      - name: Tests
+        run: go test ./...
+
+      - name: Coverage (85% per logic package)
+        run: |
+          pkgs=$(go list -f '{{if ne .Name "main"}}{{.ImportPath}}{{end}}' ./... | grep -vE '/(migrations|models)$')
+          go test -cover $pkgs | awk '/coverage:/ { match($0, /[0-9.]+%/); c = substr($0, RSTART, RLENGTH - 1); if (c + 0 < 85) { print; low = 1 } } END { exit low }'
+
+      - name: Formatting
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: Cyclomatic complexity
+        run: go tool gocyclo -over 9 .
+
+      - name: Package comments
+        run: "! go list -f '{{if not .Doc}}{{.ImportPath}}{{end}}' ./... | grep ."
