@@ -2,3 +2,6 @@ node_modules
 .env
 # Go build outputs: go build -o bin/ ./microservices/...
 /bin/
+
+# Helm dependencies, downloaded by helm dependency build from Chart.lock.
+deploy/helm/*/charts/

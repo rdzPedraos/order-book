@@ -1,0 +1,70 @@
+{{- range $name, $deployment := .Values.deployments }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+spec:
+  replicas: {{ $deployment.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $.Release.Name }}-{{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $.Release.Name }}-{{ $name }}
+    spec:
+      containers:
+        - name: {{ $deployment.service }}
+          image: {{ include "orderbook.image" (dict "root" $ "service" $deployment.service) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ $.Release.Name }}-common
+          env:
+            {{- include "orderbook.dbPassword" $ | nindent 12 }}
+            - name: DB_NAME
+              value: {{ $deployment.database }}
+            {{- with $deployment.role }}
+            - name: ROLE
+              value: {{ . }}
+            {{- end }}
+            {{- range $key, $value := $deployment.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 2121
+            {{- if $deployment.http }}
+            - name: http
+              containerPort: 8000
+            {{- end }}
+          {{- if $deployment.http }}
+          readinessProbe:
+            httpGet: {path: /.well-known/health, port: http}
+          livenessProbe:
+            httpGet: {path: /.well-known/alive, port: http}
+          {{- else }}
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+          {{- end }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+{{- if $deployment.http }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+spec:
+  selector:
+    app: {{ $.Release.Name }}-{{ $name }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+{{- end }}
+{{- end }}

@@ -1,0 +1,113 @@
+# Images are orderbook/<service>:<tag>, built from microservices/<service>/Dockerfile.
+image:
+  repository: orderbook
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# One matching engine per book, named after it: BRL-VIB runs as
+# orderbook-engine-brl-vib. Each one is the single writer of its book.
+books:
+  - BRL-VIB
+
+# One entry point for clients (design D3). Only the public routes have a
+# rule: /.well-known/* is for the probes, and /wallet goes only to the api
+# role, where /wallet/internal/funds:batch does not exist.
+ingress:
+  className: nginx
+  host: orderbook.local
+  routes:
+    /orders: order-api
+    /wallet: wallet-api
+    /market: market
+  # Redpanda Console, the web UI of the log: topics, messages and consumer
+  # lag. It serves from /, so it gets its own host.
+  consoleHost: console.orderbook.local
+
+# The stateless services, one Deployment each (design D2). A deployment with
+# http serves its routes on port 8000 behind a Service of the same name; the
+# others only read the log and answer their probes on the metrics port.
+deployments:
+  order-api:
+    service: order-service
+    role: api
+    replicas: 2
+    database: order_service
+    http: true
+  order-projector:
+    service: order-service
+    role: projector
+    replicas: 1
+    database: order_service
+    env:
+      COMMAND_LOG_GROUP: order-service
+  wallet-api:
+    service: wallet-service
+    role: api
+    replicas: 2
+    database: wallet_service
+    http: true
+  wallet-funds:
+    service: wallet-service
+    role: funds
+    replicas: 2
+    database: wallet_service
+    http: true
+  wallet-trades:
+    service: wallet-service
+    role: trades
+    replicas: 1
+    database: wallet_service
+    env:
+      EVENT_LOG_GROUP: wallet-trades
+  market:
+    service: market-service
+    replicas: 2
+    database: market_service
+    http: true
+    env:
+      EVENT_LOG_GROUP: market-service
+
+resources:
+  requests: {cpu: 100m, memory: 64Mi}
+  limits: {memory: 256Mi}
+
+engine:
+  storage: 1Gi
+  resources:
+    requests: {cpu: 500m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+postgres:
+  enabled: true
+
+# Creates the two topics of the log once Redpanda answers, with every
+# message kept forever: the engine rebuilds its book by rereading them.
+topics:
+  image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+  partitions: 1
+  replicas: 1
+
+# The log, with one broker. The chart puts each broker on its own node, so
+# more brokers need a cluster with more nodes; raise replicas and
+# topics.replicas together there.
+redpanda:
+  fullnameOverride: redpanda
+  statefulset:
+    replicas: 1
+  tls:
+    enabled: false
+  external:
+    enabled: false
+  console:
+    enabled: true
+  resources:
+    cpu:
+      cores: 1
+    memory:
+      container:
+        max: 1.5Gi
+  storage:
+    persistentVolume:
+      size: 2Gi
+  tuning:
+    tune_aio_events: false

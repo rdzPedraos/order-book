@@ -1,0 +1,9 @@
+dependencies:
+- name: postgres
+  repository: file://../postgres
+  version: 0.1.0
+- name: redpanda
+  repository: https://charts.redpanda.com
+  version: 26.2.4
+digest: sha256:096a0e6d75ec94ff0af09e1d9ebe98553eca1d7bdc1786fe5039db4d8864f1c4
+generated: "2026-10-02T17:38:14.689729891-05:00"

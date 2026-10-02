@@ -1,0 +1,23 @@
+# The services fail until the topics exist and Kubernetes restarts them, so
+# the order in which they start does not matter. An existing topic is not an
+# error, so the Job can run again on every upgrade.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-topics
+spec:
+  backoffLimit: 30
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: {{ .Values.topics.image }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - >-
+              rpk topic create orders.commands orders.events
+              --brokers redpanda:9093
+              --partitions {{ .Values.topics.partitions }} --replicas {{ .Values.topics.replicas }}
+              --topic-config retention.ms=-1 --topic-config retention.bytes=-1
+              || rpk topic list --brokers redpanda:9093 | grep -q orders.events

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: postgres
+description: One PostgreSQL instance with a database per service. Installed on its own, or as a dependency of the orderbook chart.
+type: application
+version: 0.1.0
+appVersion: "16"

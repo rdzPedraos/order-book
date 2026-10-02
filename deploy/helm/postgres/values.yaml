@@ -1,0 +1,18 @@
+image: postgres:16-alpine
+
+auth:
+  user: exchange
+  password: exchange
+
+# One database per service: services never share a database. Created only
+# when the volume is empty, like deploy/postgres/init.sql in compose.
+databases:
+  - order_service
+  - wallet_service
+  - market_service
+
+storage: 2Gi
+
+resources:
+  requests: {cpu: 250m, memory: 256Mi}
+  limits: {memory: 1Gi}

@@ -1,0 +1,66 @@
+# One engine per book (design D2), the single writer of that book: one pod,
+# and a volume ready for the snapshots of phase 7. Its book lives in memory
+# and is rebuilt from the log.
+{{- range $book := .Values.books }}
+{{- $name := printf "%s-engine-%s" $.Release.Name (lower $book) }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app: {{ $name }}
+    spec:
+      containers:
+        - name: matching-engine
+          image: {{ include "orderbook.image" (dict "root" $ "service" "matching-engine") }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ $.Release.Name }}-common
+          env:
+            - name: BOOK
+              value: {{ $book }}
+            - name: WALLET_FUNDS_URL
+              value: http://{{ $.Release.Name }}-wallet-funds
+          ports:
+            - name: metrics
+              containerPort: 2121
+          readinessProbe:
+            httpGet: {path: /metrics, port: metrics}
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+          resources:
+            {{- toYaml $.Values.engine.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ $.Values.engine.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+spec:
+  clusterIP: None
+  selector:
+    app: {{ $name }}
+  ports:
+    - name: metrics
+      port: 2121
+{{- end }}

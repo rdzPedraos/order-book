@@ -1,0 +1,16 @@
+# What every service shares: where PostgreSQL and the log are.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-common
+data:
+  GOFR_TELEMETRY: "false"
+  HTTP_PORT: "8000"
+  METRICS_PORT: "2121"
+  DB_DIALECT: postgres
+  DB_HOST: {{ .Release.Name }}-postgres
+  DB_PORT: "5432"
+  DB_USER: {{ .Values.postgres.auth.user | default "exchange" }}
+  DB_SSL_MODE: disable
+  COMMAND_LOG_BROKERS: redpanda:9093
+  EVENT_LOG_BROKERS: redpanda:9093

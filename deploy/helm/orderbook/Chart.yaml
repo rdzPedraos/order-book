@@ -1,0 +1,14 @@
+apiVersion: v2
+name: orderbook
+description: The Vibranium order book in one release - OrderService, WalletService, MarketService, the matching engine, Redpanda and PostgreSQL.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: postgres
+    version: 0.1.0
+    repository: file://../postgres
+    condition: postgres.enabled
+  - name: redpanda
+    version: 26.2.4
+    repository: https://charts.redpanda.com

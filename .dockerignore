@@ -1,0 +1,8 @@
+# Each Dockerfile copies only go.mod, go.sum, shared/ and its own service.
+.git
+bin
+docs
+openspec
+deploy
+tools
+.env
