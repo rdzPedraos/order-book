@@ -224,3 +224,53 @@ func TestReduceQuantity(t *testing.T) {
 		c.False(New().ReduceQuantity(uuid.New(), 1))
 	})
 }
+
+func TestGetFirst(t *testing.T) {
+	t.Run("the order that arrived first at the price", func(t *testing.T) {
+		c := require.New(t)
+		book := New()
+		first, second := limitOrder(models.SideSell, 9500, 2, 1), limitOrder(models.SideSell, 9500, 3, 2)
+		book.Put(first)
+		book.Put(second)
+
+		level, _ := book.GetBestLevel(models.SideSell)
+		c.Equal(first.ID, level.GetFirst().ID)
+
+		book.Remove(first.ID)
+		c.Equal(second.ID, level.GetFirst().ID)
+	})
+}
+
+func TestGetLevel(t *testing.T) {
+	t.Run("a level with its volume and number of orders", func(t *testing.T) {
+		c := require.New(t)
+		book := New()
+		book.Put(limitOrder(models.SideSell, 9500, 2, 1))
+		book.Put(limitOrder(models.SideSell, 9500, 3, 2))
+
+		level, ok := book.GetLevel(models.SideSell, 9500)
+		c.True(ok)
+		c.Equal(int64(5), level.Volume)
+		c.Equal(2, level.Count)
+	})
+
+	t.Run("an emptied level is gone", func(t *testing.T) {
+		c := require.New(t)
+		book := New()
+		order := limitOrder(models.SideBuy, 9000, 1, 1)
+		book.Put(order)
+		book.Remove(order.ID)
+
+		_, ok := book.GetLevel(models.SideBuy, 9000)
+		c.False(ok)
+	})
+
+	t.Run("the other side has no level at that price", func(t *testing.T) {
+		c := require.New(t)
+		book := New()
+		book.Put(limitOrder(models.SideBuy, 9000, 1, 1))
+
+		_, ok := book.GetLevel(models.SideSell, 9000)
+		c.False(ok)
+	})
+}

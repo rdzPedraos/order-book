@@ -18,10 +18,42 @@ Services talk through the log (Redpanda, Kafka API) with `shared/eventlog`: the 
 | `orders.events.OrderRejected` | MatchingEngine | `reason`: `insufficient_funds` or `invalid_amount` |
 | `orders.events.OrderCancelled` | MatchingEngine | `cancelledQuantity` and `released`; `reason` is `no_liquidity` for a market order's remainder, empty when the person cancelled |
 | `orders.events.OrderModified` | MatchingEngine | The new `limit` and `quantity` |
+| `orders.events.TradeExecuted` | MatchingEngine | One cross: both orders and people, the maker's side and price, the quantity and what the buyer pays |
+| `orders.events.OrderBookLevelChanged` | MatchingEngine | The whole state of one price level after a command: `volume` and `orders`, both `0` when it emptied |
 
 The engine publishes only what changes an order: a cancellation or modification that cannot apply (unknown order, someone else's, already final, or short of funds) changes nothing, so it is logged and no event is published.
 
 Every event payload carries an `EventHeader`: the command's `sequence` in its book, the event's `index` among that command's events, the command's `commandId` and `commandOffset`, and the `orderId` and `userId`. An event's `id` is fixed by its command's `id` and its index (`events.NewEventMessage`), which the log keeps unchanged, so a retried batch or a restart publishes the same ids, and the engine resumes after a restart from the last event's `commandOffset` and `index`.
+
+### Execution events
+
+A command that crosses publishes, in this order: its own event (`OrderAccepted` or `OrderModified`), one `TradeExecuted` per cross, an `OrderCancelled` if its remainder cannot rest, and one `OrderBookLevelChanged` per level it changed. All of them carry the command's `sequence`. An order is fully executed when its trades add up to its quantity, so there is no separate fill event. When a limit buy pays less than its limit, the engine frees the difference in the wallet in the same batch; the event does not carry it.
+
+Example (HU-12 of the PDR): the book has sells of 2 VIB at R$ 95 (Ana), 3 VIB at R$ 95 (Beto, later) and 5 VIB at R$ 98, and a limit buy of 6 VIB at most R$ 100 arrives. It publishes `OrderAccepted`, three trades and two level changes. The first trade:
+
+```json
+{
+  "sequence": 4, "index": 1,
+  "commandId": "01a0fe43-4092-7c12-9895-bf49f6cdd885", "commandOffset": 3,
+  "orderId": "01a0fe43-410a-799f-8997-912d70cdba2b", "userId": "carla",
+  "tradeId": "8a3f7e2c-1b4d-5e6f-9a0b-1c2d3e4f5a6b",
+  "buyOrderId": "01a0fe43-410a-799f-8997-912d70cdba2b",
+  "sellOrderId": "01a0fe43-3f11-7a2b-8c3d-4e5f6a7b8c9d",
+  "buyerId": "carla", "sellerId": "ana", "makerSide": "SELL",
+  "price": "9500", "quantity": "2", "amount": "19000"
+}
+```
+
+The other two trades are 3 VIB at `"9500"` with Beto (`amount` `"28500"`) and 1 VIB at `"9800"` (`amount` `"9800"`). The buyer pays R$ 573 of the R$ 600 frozen, and the engine frees the R$ 27 left. The two levels it changed:
+
+```json
+{ "sequence": 4, "index": 4, "commandId": "01a0fe43-4092-7c12-9895-bf49f6cdd885", "commandOffset": 3,
+  "orderId": "01a0fe43-410a-799f-8997-912d70cdba2b", "userId": "carla",
+  "side": "SELL", "price": "9500", "volume": "0", "orders": 0 }
+{ "sequence": 4, "index": 5, "commandId": "01a0fe43-4092-7c12-9895-bf49f6cdd885", "commandOffset": 3,
+  "orderId": "01a0fe43-410a-799f-8997-912d70cdba2b", "userId": "carla",
+  "side": "SELL", "price": "9800", "volume": "4", "orders": 1 }
+```
 
 ## Publishing
 

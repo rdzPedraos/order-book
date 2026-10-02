@@ -43,6 +43,7 @@ func applyCancelOrder(ctx *gofr.Context, current *batch, applied *command) error
 	}
 
 	applied.book.Remove(order.ID)
+	applied.touchLevel(order.Side, order.Price, order)
 	current.release(applied.record.Message.ID, *order, currency, order.Reserved)
 
 	current.emit(ctx, applied, events.RouteOrderCancelled, order.ID, order.UserID, func(header events.EventHeader) any {

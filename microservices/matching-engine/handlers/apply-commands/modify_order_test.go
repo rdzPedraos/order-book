@@ -35,10 +35,10 @@ func TestModifyOrder(t *testing.T) {
 		c.Equal(int64(4), resting.Quantity)
 		c.Equal(int64(36000), resting.Reserved)
 		c.Equal(uint64(1), resting.Sequence)
-		c.Equal(events.RouteOrderModified, log.Messages[1].Route)
+		c.Equal(events.RouteOrderModified, getOrderEvents(log)[1].Route)
 
 		var modified events.OrderModified
-		c.NoError(log.Messages[1].ParsePayload(&modified))
+		c.NoError(getOrderEvents(log)[1].ParsePayload(&modified))
 		c.Equal(ptr(int64(4)), modified.Quantity)
 		c.Equal(ptr(int64(9000)), modified.Limit)
 	})
@@ -76,7 +76,7 @@ func TestModifyOrder(t *testing.T) {
 		}
 
 		c.Equal([]uuid.UUID{getOrderID(c, other), getOrderID(c, order)}, ids)
-		c.Equal(events.RouteOrderModified, log.Messages[2].Route)
+		c.Equal(events.RouteOrderModified, getOrderEvents(log)[2].Route)
 	})
 
 	t.Run("new price moves the order to its new level", func(t *testing.T) {

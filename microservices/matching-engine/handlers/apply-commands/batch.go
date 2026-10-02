@@ -20,12 +20,16 @@ type batch struct {
 	events       []events.Message
 }
 
-// One command being applied: its events are numbered in the order they are emitted.
+// One command being applied: its events and its trades are numbered in the
+// order they are emitted.
 type command struct {
 	record   consumer.Record
 	book     *orderbook.Book
 	sequence uint64
 	index    int
+	fills    int
+
+	touchedLevels []touchedLevel
 }
 
 // Reserves, in one call, the funds of every new order of the batch that was
@@ -61,8 +65,15 @@ func prepareBatch(ctx *gofr.Context, records []consumer.Record) (*batch, error) 
 	return current, nil
 }
 
-// The id of the message that frees the funds makes the release apply once.
+// The id of the message that frees the funds makes the release apply once,
+// so what one command frees for its order goes in a single release.
 func (b *batch) release(messageID uuid.UUID, order models.Order, currency money.Currency, amount int64) {
+	if last := len(b.releases) - 1; last >= 0 && b.releases[last].MessageID == messageID {
+		b.releases[last].Amount += amount
+
+		return
+	}
+
 	b.releases = append(b.releases, walletclient.Operation{
 		Type: walletclient.TypeRelease, MessageID: messageID, OrderID: order.ID,
 		UserID: order.UserID, Currency: currency, Amount: amount,

@@ -6,10 +6,11 @@ import (
 	"github.com/rdzpedraos/order-book/microservices/matching-engine/models"
 )
 
-// The orders of one price, in arrival order, and their pending quantity.
+// The orders of one price, in arrival order: their pending quantity and how many they are.
 type Level struct {
 	Price  int64
 	Volume int64
+	Count  int
 	head   *node
 	tail   *node
 }
@@ -32,6 +33,7 @@ func (l *Level) append(order *models.Order) *node {
 
 	l.tail = added
 	l.Volume += order.Quantity
+	l.Count++
 
 	return added
 }
@@ -50,6 +52,12 @@ func (l *Level) unlink(removed *node) {
 	}
 
 	l.Volume -= removed.order.Quantity
+	l.Count--
+}
+
+// The order that arrived first, which crosses before the others.
+func (l *Level) GetFirst() *models.Order {
+	return l.head.order
 }
 
 func (l *Level) Orders() iter.Seq[*models.Order] {

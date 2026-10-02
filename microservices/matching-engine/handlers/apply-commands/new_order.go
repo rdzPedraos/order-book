@@ -125,13 +125,7 @@ func applyNewOrder(ctx *gofr.Context, current *batch, applied *command) error {
 	})
 
 	order := buildOrder(prepared, applied.sequence)
-	if order.Type == models.TypeLimit {
-		applied.book.Put(&order)
-
-		return nil
-	}
-
-	cancelWithoutLiquidity(ctx, current, applied, prepared, order)
+	crossOrder(ctx, current, applied, &order)
 
 	return nil
 }
@@ -142,16 +136,6 @@ func getRejectionReason(prepared *preparedOrder) string {
 	}
 
 	return events.ReasonInsufficientFunds
-}
-
-// A market order never rests: with no counterparty yet, it is cancelled and
-// its whole reservation goes back to the wallet.
-func cancelWithoutLiquidity(ctx *gofr.Context, current *batch, applied *command, prepared *preparedOrder, order models.Order) {
-	current.release(applied.record.Message.ID, order, prepared.currency, order.Reserved)
-
-	current.emit(ctx, applied, events.RouteOrderCancelled, order.ID, order.UserID, func(header events.EventHeader) any {
-		return events.OrderCancelled{EventHeader: header, CancelledQuantity: order.Quantity, Released: order.Reserved, Reason: events.ReasonNoLiquidity}
-	})
 }
 
 func buildOrder(prepared *preparedOrder, sequence uint64) models.Order {

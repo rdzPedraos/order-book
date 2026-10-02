@@ -96,3 +96,127 @@ func TestNotional(t *testing.T) {
 		c.ErrorIs(err, ErrUnknownCurrency)
 	})
 }
+
+func TestQuantityFor(t *testing.T) {
+	t.Run("BRL-VIB: R$ 500.00 at R$ 110.00 buys 4 VIB", func(t *testing.T) {
+		c := require.New(t)
+
+		quantity, err := QuantityFor(VIB, 50000, 11000)
+		c.NoError(err)
+		c.Equal(int64(4), quantity)
+	})
+
+	t.Run("base with decimals buys a fraction", func(t *testing.T) {
+		c := require.New(t)
+		base := withTestCurrency(t, 2)
+
+		quantity, err := QuantityFor(base, 4500, 9000)
+		c.NoError(err)
+		c.Equal(int64(50), quantity)
+	})
+
+	t.Run("not enough for one unit", func(t *testing.T) {
+		c := require.New(t)
+
+		quantity, err := QuantityFor(VIB, 10999, 11000)
+		c.NoError(err)
+		c.Equal(int64(0), quantity)
+	})
+
+	t.Run("result that does not fit in int64", func(t *testing.T) {
+		c := require.New(t)
+		base := withTestCurrency(t, 2)
+
+		_, err := QuantityFor(base, math.MaxInt64, 1)
+		c.ErrorIs(err, ErrOverflow)
+	})
+
+	t.Run("price that is not positive", func(t *testing.T) {
+		c := require.New(t)
+
+		_, err := QuantityFor(VIB, 50000, 0)
+		c.ErrorIs(err, ErrOutOfRange)
+	})
+
+	t.Run("negative amount", func(t *testing.T) {
+		c := require.New(t)
+
+		_, err := QuantityFor(VIB, -1, 11000)
+		c.ErrorIs(err, ErrNegative)
+	})
+
+	t.Run("unknown currency", func(t *testing.T) {
+		c := require.New(t)
+
+		_, err := QuantityFor("XXX", 1, 1)
+		c.ErrorIs(err, ErrUnknownCurrency)
+	})
+}
+
+func TestAveragePrice(t *testing.T) {
+	t.Run("BRL-VIB: R$ 410.00 for 4 VIB averages R$ 102.50", func(t *testing.T) {
+		c := require.New(t)
+
+		average, err := AveragePrice(VIB, 41000, 4)
+		c.NoError(err)
+		c.Equal(int64(10250), average)
+	})
+
+	t.Run("half a cent rounds up", func(t *testing.T) {
+		c := require.New(t)
+
+		average, err := AveragePrice(VIB, 10001, 2)
+		c.NoError(err)
+		c.Equal(int64(5001), average)
+	})
+
+	t.Run("less than half a cent rounds down", func(t *testing.T) {
+		c := require.New(t)
+
+		average, err := AveragePrice(VIB, 10001, 3)
+		c.NoError(err)
+		c.Equal(int64(3334), average)
+	})
+
+	t.Run("base with decimals", func(t *testing.T) {
+		c := require.New(t)
+		base := withTestCurrency(t, 2)
+
+		average, err := AveragePrice(base, 4500, 50)
+		c.NoError(err)
+		c.Equal(int64(9000), average)
+	})
+
+	t.Run("nothing executed yet", func(t *testing.T) {
+		c := require.New(t)
+
+		average, err := AveragePrice(VIB, 0, 0)
+		c.NoError(err)
+		c.Equal(int64(0), average)
+	})
+
+	t.Run("result that does not fit in int64", func(t *testing.T) {
+		c := require.New(t)
+		base := withTestCurrency(t, 2)
+
+		_, err := AveragePrice(base, math.MaxInt64, 1)
+		c.ErrorIs(err, ErrOverflow)
+	})
+
+	t.Run("negative total or quantity", func(t *testing.T) {
+		c := require.New(t)
+
+		_, err := AveragePrice(VIB, -1, 1)
+		c.ErrorIs(err, ErrNegative)
+
+		_, err = AveragePrice(VIB, 1, -1)
+		c.ErrorIs(err, ErrNegative)
+	})
+
+	t.Run("unknown currency", func(t *testing.T) {
+		c := require.New(t)
+
+		_, err := AveragePrice("XXX", 1, 1)
+		c.ErrorIs(err, ErrUnknownCurrency)
+	})
+}

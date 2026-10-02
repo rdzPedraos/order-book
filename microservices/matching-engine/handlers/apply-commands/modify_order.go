@@ -77,28 +77,29 @@ func changeOrder(ctx *gofr.Context, current *batch, applied *command, order *mod
 		current.release(applied.record.Message.ID, *order, currency, order.Reserved-required)
 	}
 
-	moveInBook(applied, order, price, quantity)
+	keepsPlace := price == order.Price && quantity <= order.Quantity
+	applied.touchLevel(order.Side, order.Price, order)
+
+	if keepsPlace {
+		applied.book.ReduceQuantity(order.ID, quantity)
+	} else {
+		applied.book.Remove(order.ID)
+		order.Price, order.Quantity, order.Sequence = price, quantity, applied.sequence
+	}
+
 	order.Reserved = required
 
 	current.emit(ctx, applied, events.RouteOrderModified, order.ID, order.UserID, func(header events.EventHeader) any {
 		return events.OrderModified{EventHeader: header, Limit: &price, Quantity: &quantity}
 	})
 
-	return "", nil
-}
-
-// Only lowering the quantity at the same price keeps the order's place;
-// any other change sends it to the end of its new level.
-func moveInBook(applied *command, order *models.Order, price, quantity int64) {
-	if price == order.Price && quantity <= order.Quantity {
-		applied.book.ReduceQuantity(order.ID, quantity)
-
-		return
+	// Only lowering the quantity at the same price keeps the order's place; any
+	// other change makes it an incoming order again, which may cross.
+	if !keepsPlace {
+		crossOrder(ctx, current, applied, order)
 	}
 
-	applied.book.Remove(order.ID)
-	order.Price, order.Quantity, order.Sequence = price, quantity, applied.sequence
-	applied.book.Put(order)
+	return "", nil
 }
 
 func getRequiredReservation(bookID string, side models.Side, quantity, price int64) (money.Currency, int64, error) {

@@ -28,9 +28,65 @@ func Notional(base Currency, quantity, price int64) (int64, error) {
 		cost.Add(cost, big.NewInt(1))
 	}
 
-	if !cost.IsInt64() {
+	return getInt64(cost)
+}
+
+// How much of base a market buy gets for amount at price: the opposite of
+// Notional. Example: R$ 500.00 (amount 50000 cents) at R$ 110.00 (price 11000)
+// buys 4 VIB. A fraction of the base's smallest unit rounds down, so the buy
+// never takes more than its money covers.
+func QuantityFor(base Currency, amount, price int64) (int64, error) {
+	if amount < 0 {
+		return 0, ErrNegative
+	}
+
+	if price <= 0 {
+		return 0, ErrOutOfRange
+	}
+
+	decimals, err := base.GetDecimals()
+	if err != nil {
+		return 0, err
+	}
+
+	quantity := new(big.Int).Mul(big.NewInt(amount), big.NewInt(pow10(decimals)))
+	quantity.Quo(quantity, big.NewInt(price))
+
+	return getInt64(quantity)
+}
+
+// The average price an order paid: total spent over the quantity executed.
+// Example: R$ 410.00 (total 41000) for 4 VIB averages R$ 102.50 (10250). Half a
+// cent rounds up. It is informative only: no balance is computed from it.
+func AveragePrice(base Currency, total, quantity int64) (int64, error) {
+	if total < 0 || quantity < 0 {
+		return 0, ErrNegative
+	}
+
+	if quantity == 0 {
+		return 0, nil
+	}
+
+	decimals, err := base.GetDecimals()
+	if err != nil {
+		return 0, err
+	}
+
+	average := new(big.Int).Mul(big.NewInt(total), big.NewInt(pow10(decimals)))
+	average, leftover := average.QuoRem(average, big.NewInt(quantity), new(big.Int))
+
+	// The leftover is at least half the quantity when the dropped fraction is ≥ 0.5.
+	if leftover.Mul(leftover, big.NewInt(2)).Cmp(big.NewInt(quantity)) >= 0 {
+		average.Add(average, big.NewInt(1))
+	}
+
+	return getInt64(average)
+}
+
+func getInt64(value *big.Int) (int64, error) {
+	if !value.IsInt64() {
 		return 0, ErrOverflow
 	}
 
-	return cost.Int64(), nil
+	return value.Int64(), nil
 }

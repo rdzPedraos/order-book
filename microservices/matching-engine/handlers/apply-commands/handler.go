@@ -59,9 +59,12 @@ func applyCommand(ctx *gofr.Context, current *batch, record consumer.Record) err
 	}
 
 	if apply, ok := applyByRoute[record.Message.Route]; ok {
-		if err := apply(ctx, current, &command{record: record, book: book}); err != nil {
+		applied := &command{record: record, book: book}
+		if err := apply(ctx, current, applied); err != nil {
 			return err
 		}
+
+		emitLevelChanges(ctx, current, applied)
 	}
 
 	book.MarkApplied(record.Message.ID)

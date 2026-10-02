@@ -135,7 +135,7 @@ func TestRestart(t *testing.T) {
 		}
 
 		runEngineUntil(t, broker, 1000)
-		publishedBefore := len(readEvents(c, broker, 1000))
+		publishedBefore := len(readEvents(c, broker, 2000))
 		before := orderbook.GetBook("BRL-VIB").Len()
 		balance := wallet.GetBalance("ana", money.BRL)
 
@@ -147,10 +147,10 @@ func TestRestart(t *testing.T) {
 
 		c.Equal(before, orderbook.GetBook("BRL-VIB").Len())
 		c.Equal(balance, wallet.GetBalance("ana", money.BRL))
-		c.Equal(1000, publishedBefore)
+		c.Equal(2000, publishedBefore, "each command publishes its order event and its level change")
 
 		end, err := consumer.GetLastMessage(context.Background(), []string{broker}, "orders.events", 0)
 		c.NoError(err)
-		c.Equal(int64(999), end.Offset, "no event was published twice")
+		c.Equal(int64(1999), end.Offset, "no event was published twice")
 	})
 }

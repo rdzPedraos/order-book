@@ -27,7 +27,6 @@ func ptr[T any](value T) *T {
 	return &value
 }
 
-// A context whose metrics accept any recording; tests that check a metric set their own expectations.
 func newContextWith(t *testing.T, ctx context.Context) *gofr.Context {
 	t.Helper()
 
@@ -84,9 +83,21 @@ func toBatch(messages ...events.Message) []consumer.Record {
 	return batch
 }
 
-func getRoutes(log *producer.Mock) []string {
-	routes := make([]string, 0, len(log.Messages))
+// The published events without the level changes, which TestLevelChanges checks.
+func getOrderEvents(log *producer.Mock) []events.Message {
+	var orderEvents []events.Message
 	for _, message := range log.Messages {
+		if message.Route != events.RouteOrderBookLevelChanged {
+			orderEvents = append(orderEvents, message)
+		}
+	}
+
+	return orderEvents
+}
+
+func getRoutes(log *producer.Mock) []string {
+	var routes []string
+	for _, message := range getOrderEvents(log) {
 		routes = append(routes, message.Route)
 	}
 
@@ -126,7 +137,7 @@ func TestHandle(t *testing.T) {
 		c.NoError(Handle(newContext(t), toBatch(limitBuy(c, "ana", 1, 9000))))
 
 		var sequences []uint64
-		for _, message := range log.Messages {
+		for _, message := range getOrderEvents(log) {
 			var accepted events.OrderAccepted
 			c.NoError(message.ParsePayload(&accepted))
 			sequences = append(sequences, accepted.Sequence)
@@ -172,7 +183,7 @@ func TestHandle(t *testing.T) {
 		c.NoError(Handle(newContext(t), toBatch(order)))
 
 		var rejected events.OrderRejected
-		c.NoError(log.Messages[0].ParsePayload(&rejected))
+		c.NoError(getOrderEvents(log)[0].ParsePayload(&rejected))
 		c.Equal(getOrderID(c, order), rejected.OrderID)
 		c.Equal("ana", rejected.UserID)
 		c.Equal(events.ReasonInsufficientFunds, rejected.Reason)
@@ -190,9 +201,9 @@ func TestHandle(t *testing.T) {
 		c.Equal([]string{events.RouteOrderAccepted}, getRoutes(log))
 
 		var accepted events.OrderAccepted
-		c.NoError(log.Messages[0].ParsePayload(&accepted))
+		c.NoError(getOrderEvents(log)[0].ParsePayload(&accepted))
 		c.Equal(events.EventHeader{Sequence: 1, Index: 0, CommandID: order.ID, CommandOffset: 0, OrderID: getOrderID(c, order), UserID: "ana"}, accepted.EventHeader)
-		c.Equal(acceptedAt, log.Messages[0].CreatedAt)
+		c.Equal(acceptedAt, getOrderEvents(log)[0].CreatedAt)
 	})
 
 	t.Run("limit without counterparty rests in the book", func(t *testing.T) {
@@ -226,7 +237,7 @@ func TestHandle(t *testing.T) {
 		c.Equal([]string{events.RouteOrderAccepted, events.RouteOrderCancelled}, getRoutes(log))
 
 		var cancelled events.OrderCancelled
-		c.NoError(log.Messages[1].ParsePayload(&cancelled))
+		c.NoError(getOrderEvents(log)[1].ParsePayload(&cancelled))
 		c.Equal(events.ReasonNoLiquidity, cancelled.Reason)
 		c.Equal(int64(3), cancelled.CancelledQuantity)
 		c.Equal(int64(3), cancelled.Released)
@@ -255,7 +266,7 @@ func TestHandle(t *testing.T) {
 
 		c.Equal([]string{events.RouteOrderRejected, events.RouteOrderRejected}, getRoutes(log))
 		var rejected events.OrderRejected
-		c.NoError(log.Messages[1].ParsePayload(&rejected))
+		c.NoError(getOrderEvents(log)[1].ParsePayload(&rejected))
 		c.Equal(events.ReasonInvalidAmount, rejected.Reason)
 		c.Equal(0, wallet.Calls)
 	})

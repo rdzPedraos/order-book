@@ -70,8 +70,10 @@ func TestPublicationFlow(t *testing.T) {
 
 		runEngineUntil(t, broker, 2)
 
-		published := readEvents(c, broker, 2)
-		c.Equal([]string{events.RouteOrderAccepted, events.RouteOrderCancelled}, []string{published[0].Route, published[1].Route})
+		published := readEvents(c, broker, 4)
+		c.Equal([]string{
+			events.RouteOrderAccepted, events.RouteOrderBookLevelChanged, events.RouteOrderCancelled, events.RouteOrderBookLevelChanged,
+		}, []string{published[0].Route, published[1].Route, published[2].Route, published[3].Route})
 		c.Equal(walletclient.Balance{Available: 90000}, wallet.GetBalance("ana", money.BRL))
 	})
 }

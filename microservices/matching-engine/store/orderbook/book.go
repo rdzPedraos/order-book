@@ -107,6 +107,12 @@ func (b *Book) ReduceQuantity(orderID uuid.UUID, quantity int64) bool {
 	return true
 }
 
+func (b *Book) GetLevel(orderSide models.Side, price int64) (*Level, bool) {
+	level, ok := b.sides[orderSide].levels[price]
+
+	return level, ok
+}
+
 // The highest buy or the lowest sell.
 func (b *Book) GetBestLevel(orderSide models.Side) (*Level, bool) {
 	side := b.sides[orderSide]

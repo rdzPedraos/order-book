@@ -34,8 +34,8 @@ func TestCancelOrder(t *testing.T) {
 		c.Equal(walletclient.Balance{Available: 54000}, wallet.GetBalance("ana", money.BRL))
 
 		var cancelled events.OrderCancelled
-		c.NoError(log.Messages[1].ParsePayload(&cancelled))
-		c.Equal(events.RouteOrderCancelled, log.Messages[1].Route)
+		c.NoError(getOrderEvents(log)[1].ParsePayload(&cancelled))
+		c.Equal(events.RouteOrderCancelled, getOrderEvents(log)[1].Route)
 		c.Equal(int64(54000), cancelled.Released)
 		c.Equal(int64(6), cancelled.CancelledQuantity)
 		c.Equal(uint64(2), cancelled.Sequence)
