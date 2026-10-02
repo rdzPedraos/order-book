@@ -30,7 +30,7 @@ La regla central del PRD es que ninguna orden entra al book sin su dinero congel
   - loop por book sobre la partición fija, con micro-batches y dedupe por el `id` del mensaje y el `orderId`;
   - `LevelStore` en memoria (heap + map + lista doblemente enlazada + índice por `orderId`);
   - reserva de fondos al aceptar, liberación al cancelar o modificar a la baja;
-- Eventos `OrderAccepted`, `OrderRejected`, `OrderCancelled`, `OrderCancelRejected`, `OrderModified` y `OrderModifyRejected` en `orders.events`, con envelope e IDs determinísticos.
+- Eventos `OrderAccepted`, `OrderRejected`, `OrderCancelled` y `OrderModified` en `orders.events`, con envelope e IDs determinísticos.
 
 ## Capabilities
 

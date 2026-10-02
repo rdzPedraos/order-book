@@ -38,7 +38,7 @@ func TestLifecycleRoutes(t *testing.T) {
 
 	topic, err := GetTopic(RouteOrderAccepted)
 	c.NoError(err)
-	c.Equal("orders.events", topic)
+	c.Equal(TopicOrderEvents, topic)
 }
 
 func TestLifecycleRoundTrip(t *testing.T) {

@@ -1,6 +1,6 @@
 # Handlers
 
-A handler is one entry point of a service (an HTTP route, a subscriber): one package in `microservices/<service>/handlers/<kebab-case>/`, with the package name without dashes (`handlers/list-orders` → `package listorders`). It holds everything that use case needs: its input, its rules, its calls to the store and its output. `handlers/modify-order` (body, path and an owned resource), `handlers/list-orders` (query parameters and a page) and `handlers/get-order` are the reference implementations.
+A handler is one entry point of a service (an HTTP route, a subscriber): one package in `microservices/<service>/handlers/<kebab-case>/`, with the package name without dashes (`handlers/list-orders` → `package listorders`). It holds everything that use case needs: its input, its rules, its calls to the store and its output. The partition reader of the matching engine is the one handler that serves several routes (see `eventlog.md`). `handlers/modify-order` (body, path and an owned resource), `handlers/list-orders` (query parameters and a page) and `handlers/get-order` are the reference implementations.
 
 ## Files
 

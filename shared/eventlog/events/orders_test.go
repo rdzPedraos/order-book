@@ -13,6 +13,10 @@ func TestOrderRoutes(t *testing.T) {
 	c.Equal("orders.commands.NewOrder", RouteNewOrder)
 	c.Equal("orders.commands.ModifyOrder", RouteModifyOrder)
 	c.Equal("orders.commands.CancelOrder", RouteCancelOrder)
+
+	topic, err := GetTopic(RouteNewOrder)
+	c.NoError(err)
+	c.Equal(TopicOrderCommands, topic)
 }
 
 func TestNewOrderPayload(t *testing.T) {

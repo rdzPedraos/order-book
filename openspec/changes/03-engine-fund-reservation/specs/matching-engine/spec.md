@@ -57,7 +57,7 @@ Una orden market MUST NOT quedar en el book. Lo que no se ejecute en el mismo co
 - **THEN** la orden termina con `OrderCancelled`, `reason = no_liquidity`, y los 3 VIB vuelven a `available`
 
 ### Requirement: Cancelación en el engine
-Un `CancelOrder` sobre una orden en el book MUST sacarla del book, liberar en la wallet su reserva no usada antes de pasar al comando siguiente y emitir `OrderCancelled` con el monto liberado. Sobre una orden inexistente, ajena o ya final, MUST emitir `OrderCancelRejected` con el motivo.
+Un `CancelOrder` sobre una orden en el book MUST sacarla del book, liberar en la wallet su reserva no usada antes de pasar al comando siguiente y emitir `OrderCancelled` con el monto liberado. Sobre una orden inexistente, ajena o ya final, MUST NOT cambiar nada ni emitir eventos; solo lo registra en el log.
 
 #### Scenario: Cancelar orden en reposo
 - **WHEN** se cancela una compra limit de 6 VIB @ R$ 90 que está en el book
@@ -65,14 +65,14 @@ Un `CancelOrder` sobre una orden en el book MUST sacarla del book, liberar en la
 
 #### Scenario: Cancelación repetida
 - **WHEN** llegan dos `CancelOrder` para una compra limit que está en el book
-- **THEN** el primero la cancela y libera su reserva, y el segundo emite `OrderCancelRejected` con `reason = already_cancelled` sin liberar nada
+- **THEN** el primero la cancela y libera su reserva, y el segundo no libera nada ni emite eventos
 
 #### Scenario: Cancelar orden desconocida
 - **WHEN** llega un `CancelOrder` de un `orderId` que el engine no conoce
-- **THEN** se emite `OrderCancelRejected` con `reason = order_not_found`
+- **THEN** no se emite ningún evento
 
 ### Requirement: Ajuste de reserva al modificar
-Un `ModifyOrder` MUST recalcular la reserva requerida por el nuevo precio y la nueva cantidad pendiente: reservar la diferencia si aumenta (rechazando con `OrderModifyRejected` si no alcanza) o liberar el excedente si disminuye. Solo después MUST aplicar el cambio y emitir `OrderModified`.
+Un `ModifyOrder` MUST recalcular la reserva requerida por el nuevo precio y la nueva cantidad pendiente: reservar la diferencia si aumenta (si no alcanza, la orden queda como estaba y no se emite ningún evento) o liberar el excedente si disminuye. Solo después MUST aplicar el cambio y emitir `OrderModified`. Sobre una orden inexistente, ajena o ya final, MUST NOT cambiar nada ni emitir eventos.
 
 #### Scenario: Reducción de cantidad
 - **WHEN** una compra en reposo de 10 VIB @ R$ 90 se reduce a 4 VIB
@@ -80,7 +80,7 @@ Un `ModifyOrder` MUST recalcular la reserva requerida por el nuevo precio y la n
 
 #### Scenario: Aumento sin fondos
 - **WHEN** se aumenta una compra de 5 a 50 VIB y no hay fondos para la diferencia
-- **THEN** se emite `OrderModifyRejected` con `reason = insufficient_funds` y la orden queda como estaba
+- **THEN** la orden queda como estaba y no se emite ningún evento
 
 ### Requirement: Reconstrucción al reiniciar
 Al arrancar, el engine MUST reconstruir su book releyendo su partición de `orders.commands` desde el principio. La relectura MUST NOT mover fondos otra vez ni publicar eventos que ya se publicaron, y MUST publicar los eventos que un lote no llegó a publicar antes de una caída.

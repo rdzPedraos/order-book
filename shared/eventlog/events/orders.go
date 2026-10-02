@@ -2,6 +2,9 @@ package events
 
 import "github.com/google/uuid"
 
+// For a reader of the whole topic, like the matching engine.
+const TopicOrderCommands = "orders.commands"
+
 const (
 	RouteNewOrder    = "orders.commands.NewOrder"
 	RouteModifyOrder = "orders.commands.ModifyOrder"

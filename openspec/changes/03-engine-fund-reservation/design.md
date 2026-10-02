@@ -73,7 +73,7 @@ poll de la partición (lo que haya, hasta 500 comandos)
   → producir los eventos del lote en orders.events (acks=all) y esperar el ack
 ```
 
-- **Lectura:** un `consumer.StartPartition` por book (D7) lee su partición fija sin consumer group, en lotes. El lote es lo que haya disponible, hasta 500 comandos, sin esperar a juntar más: con poco tráfico sale de a uno, y con mucho crece solo, que es cuando más rinde un solo viaje a la wallet. El tope se calibra con el benchmark de la fase 6. Gofr se usa solo para health y métricas.
+- **Lectura:** un `consumer.StartPartition` por book (D7) lee su partición fija sin consumer group, en lotes. El lote es lo que haya disponible, hasta 500 comandos, sin esperar a juntar más: con poco tráfico sale de a uno, y con mucho crece solo, que es cuando más rinde un solo viaje a la wallet. El tope se calibra con el benchmark de la fase 6. Gofr se usa solo para health; el rendimiento se mide con el benchmark, sin métricas propias del engine.
 - **Las reservas van antes de aplicar el lote**, porque deciden si la orden entra. Las liberaciones van antes de publicar, para que ningún `OrderCancelled` salga antes de que el dinero esté disponible.
 - **Reserva calculada sobre la orden ya conocida:** en un `ModifyOrder` la reserva adicional se calcula contra el estado de la orden. Si dentro del lote hay un `ModifyOrder` después del `NewOrder` de la misma orden, se resuelve con una tercera llamada `funds:batch` intermedia. Es un caso raro y se mide.
 - **Wallet caída:** reintento con backoff y sin avanzar. Se pierde throughput, pero nunca orden ni correctitud.
@@ -89,7 +89,7 @@ Por lado:
 
 Global: `map[orderID]*OrderNode`.
 
-Todo vive detrás de una interfaz `LevelStore` (best price, get, put, remove, iteración ordenada). La fase 8 agrega otra implementación de esa interfaz.
+Todo vive en el tipo `orderbook.Book` (mejor nivel, get, put, remove e iteración ordenada). La fase 8 agrega otra implementación, y recién entonces se extrae la interfaz `LevelStore`: hoy tendría una sola.
 
 - **Alternativa considerada:** un árbol ordenado (B-tree). Da iteración ordenada sin borrado perezoso. Se elige el heap porque el matching solo necesita el mejor precio, que el heap da en O(1), y es más simple de implementar con `container/heap` de la stdlib. La interfaz permite cambiarlo.
 
@@ -97,7 +97,7 @@ Todo vive detrás de una interfaz `LevelStore` (best price, get, put, remove, it
 
 - `sequence` es un contador por book.
 - El payload de cada evento lleva el offset del comando que lo causó y su `index` dentro de ese comando, que marcan hasta dónde publicó el engine (D6).
-- El `id` del `Message` de cada evento es el UUIDv5 de `{book}:{sequence}:{index}`: determinístico, así un lote reintentado reemite los mismos ids, y cabe en el envelope común de `shared/eventlog/events`.
+- El `id` del `Message` de cada evento es el UUIDv5 del `index` con el `id` del comando como namespace. Sale solo de lo que el log guarda sin cambios, así un lote reintentado o un reinicio reemiten los mismos ids sin depender de que el engine vuelva a contar el `sequence` igual. El `id` del comando ya es único en todo el sistema, así que no hace falta el `book`.
 - Una liberación que decide el engine (por ejemplo, el remanente de una market) lleva el `id` del mensaje que la causó, el mismo `NewOrder` que reservó: `RESERVE` y `RELEASE` no chocan en el `UNIQUE (type, message_id)` porque son de tipos distintos, y repetirla no tiene efecto.
 - Los payloads de los eventos de esta fase se agregan al catálogo de `shared/eventlog/events`, con sus rutas `orders.events.<tipo>`, y se publican con `producer.Publish`, que toma el topic de la ruta y la partición del book.
 
@@ -138,11 +138,11 @@ Siguen `.claude/standards/architecture.md` y `handlers.md`: un paquete por entry
 
 | Paquete | Responsabilidad |
 | --- | --- |
-| `shared/money` | `arithmetic.go`: `Notional` de D8, con redondeo hacia arriba y producto en 128 bits |
-| `shared/eventlog/events` | `lifecycle.go`: las rutas `orders.events.<tipo>` de los seis eventos de ciclo de vida y sus payloads, sobre el envelope común `Message` con `id` determinístico (D5) |
+| `shared/money` | `arithmetic.go`: `Notional` de D8, con redondeo hacia arriba y el producto en `math/big` |
+| `shared/eventlog/events` | `lifecycle.go`: las rutas `orders.events.<tipo>` de los cuatro eventos de ciclo de vida y sus payloads, sobre el envelope común `Message` con `id` determinístico (D5) |
 | `shared/eventlog/consumer` | `partition.go` (nuevo): `StartPartition` lee una partición fija desde el principio, sin consumer group, en lotes de lo disponible hasta un tope, entrega cada lote al handler y lo reintenta si el handler falla (D3); `GetLastMessage` devuelve el último mensaje de una partición, o ninguno si está vacía (D6) |
 | `handlers/apply-commands` | El handler del lote (D3): dedupe, `RESERVE` previas, `sequence++`, aplicación de cada comando con sus reglas (`new_order.go`, `cancel_order.go`, `modify_order.go`, `reservation.go`), `RELEASE` acumulados y publicación con `producer.Publish` de los eventos posteriores al último publicado (D6) |
-| `store/orderbook` | El `LevelStore` en memoria de D4, detrás de una variable del paquete; la fase 8 agrega otra implementación detrás de la misma variable |
+| `store/orderbook` | El book en memoria de D4 (`Book`); la fase 8 agrega otra implementación y la interfaz común |
 | `store/walletclient` | `ApplyFundsBatch(ctx, operations)`: cliente HTTP de servicios de Gofr hacia `funds:batch`, con `InitMock(t)` |
 | `models` | Estado de la orden en el engine, resultado de cada comando y los motivos de rechazo (`insufficient_funds`, `order_not_found`, …) |
 
@@ -155,7 +155,7 @@ La reserva de una compra limit es el monto en la quote de `quantity` a `limitPri
 
 - **Fórmula:** el precio es por 1 unidad entera de la base y la cantidad viene en unidades mínimas de la base, así que `Notional = quantity × price / 10^base.GetDecimals()`. Con VIB (0 decimales) el divisor es 1, pero la función no lo supone: si mañana VIB tiene decimales, solo cambia su entrada en el registro de monedas.
 - **Redondeo hacia arriba:** si la división no es exacta (0,01 VIB a R$ 0,01 da R$ 0,0001), se redondea al centavo siguiente. Una reserva redondeada hacia abajo dejaría la orden sin fondos para pagar su último trade.
-- **Overflow:** el producto intermedio puede superar `int64` aunque el resultado quepa, así que se calcula en 128 bits (`math/bits.Mul64` y `bits.Div64`). Si el resultado no cabe en `int64`, devuelve `money.ErrOverflow` y la orden se rechaza.
+- **Overflow:** el producto intermedio puede superar `int64` aunque el resultado quepa, así que se calcula con `math/big`, que no tiene límite de tamaño. Si el resultado no cabe en `int64`, devuelve `money.ErrOverflow` y la orden se rechaza.
 - **Moneda desconocida:** propaga `money.ErrUnknownCurrency` de `base.GetDecimals()`.
 - Market buy reserva su `amount` y una venta reserva su `quantity` en la base, sin aritmética.
 

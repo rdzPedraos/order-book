@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const TopicOrderEvents = "orders.events"
+
 // What the matching engine publishes about each order.
 const (
 	RouteOrderAccepted  = "orders.events.OrderAccepted"
