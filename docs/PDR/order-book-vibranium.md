@@ -1,6 +1,19 @@
 # PRD – Order Book Vibranium (MVP)
 
-> Versión: 0.1 · Fecha: 2026-09-30 · Estado: borrador
+> Versión: 0.2 · Fecha: 2026-10-02 · Estado: borrador
+
+## Desvíos aprobados respecto de la versión 0.1
+
+Al diseñar la solución técnica se aprobaron estos cambios. Prevalecen sobre cualquier texto anterior de este documento.
+
+| Tema | Versión 0.1 | Ahora |
+| --- | --- | --- |
+| Estados de una orden | La orden se resuelve en la misma respuesta; una orden rechazada no llega a existir | Toda orden nace `PENDING` y el resultado llega de forma asíncrona. Una orden sin fondos queda registrada como `REJECTED` con su motivo |
+| Saldo recibido en un trade | Disponible de inmediato | Disponible en cuanto la wallet procesa el trade (milisegundos después del matching) |
+| Profundidad del libro | Fuera del alcance | Pública y agregada por precio, vía REST (sin WebSocket) |
+| Identidad | El ID de persona viaja en la petición | El ID viaja en el header `X-User-ID`; la API todavía no autentica |
+| Idempotencia (RNF-05) | Toda operación que modifica estado acepta una clave de idempotencia | Solo depósitos y retiros. Crear una orden no es idempotente: cada `POST /orders` crea una orden nueva |
+| Nombre del book | `VIB/BRL` | `BRL-VIB`, tal como está configurado. La API lo acepta sin distinguir mayúsculas y siempre devuelve `BRL-VIB`; con los tickers en otro orden es un book desconocido |
 
 ## Índice
 
@@ -28,11 +41,11 @@ El MVP resuelve tres cosas:
 - **Confianza en la liquidación:** los fondos se congelan al crear la orden, así que ninguna ejecución puede fallar por falta de saldo ni gastar dos veces el mismo dinero.
 - **Trazabilidad:** cada persona puede ver qué se ejecutó de cada orden, a qué precio y en qué cantidad.
 
-El único par operable es **VIB/BRL**: el precio de VIB siempre se expresa en reales. El producto se entrega solo como API; no hay interfaz gráfica.
+El único book operable es **`BRL-VIB`**: se opera VIB y su precio siempre se expresa en reales. El producto se entrega solo como API; no hay interfaz gráfica.
 
 ## 2. Objetivos y alcance
 
-El MVP está listo cuando una persona puede fondear su wallet, operar BRL/VIB con órdenes market y limit, y ver cada ejecución, con 5.000 operaciones por segundo y sin perder nada confirmado ante una caída.
+El MVP está listo cuando una persona puede fondear su wallet, operar `BRL-VIB` con órdenes market y limit, y ver cada ejecución, con 5.000 operaciones por segundo y sin perder nada confirmado ante una caída.
 
 ### Métricas de éxito
 
@@ -47,19 +60,19 @@ El MVP está listo cuando una persona puede fondear su wallet, operar BRL/VIB co
 ### Dentro del alcance
 
 - API para personas, wallets (depósitos y retiros), órdenes y ejecuciones.
-- Un solo par: BRL/VIB.
+- Un solo book: `BRL-VIB`.
 - Órdenes market y limit, de compra y de venta.
 - Modificación y cancelación de órdenes.
 
 ### Fuera del alcance
 
 - Interfaz gráfica o app móvil.
-- Autenticación y autorización (la persona se identifica con su ID en la petición).
-- Pasarelas de pago reales: depósitos y retiros son simulados solo en BRL.
+- Autenticación y autorización (la persona se identifica con el header `X-User-ID`).
+- Pasarelas de pago reales: los depósitos (BRL y VIB) y los retiros (solo BRL) son simulados.
 - Comisiones.
 - Otras monedas o pares (la arquitectura debe permitir a futuro hacer esto).
 - Expiración de órdenes, stop-loss y otros tipos de orden.
-- Datos de mercado públicos (profundidad del libro, velas, ticker).
+- Datos de mercado en tiempo real (WebSocket), velas y ticker. La profundidad agregada del libro sí se publica por REST.
 
 ## 3. Glosario y reglas de negocio
 
@@ -85,7 +98,7 @@ Estas reglas aplican a todas las historias; cada historia las referencia en luga
     1. Compra limit: cantidad × precio máximo, en BRL.
     2. Compra market: el monto en BRL indicado.
     3. Venta limit o market: la cantidad de VIB.
-3. **Sin saldo, sin orden.** Antes de congelar se valida el saldo disponible: en limit, la cantidad y el precio máximo (o mínimo) que fija la persona; en market, el monto en BRL a gastar (compra) o los VIB a vender (venta). Si el disponible no alcanza, la orden se rechaza completa y no se crea.
+3. **Sin saldo, orden rechazada.** Antes de congelar se valida el saldo disponible: en limit, la cantidad y el precio máximo (o mínimo) que fija la persona; en market, el monto en BRL a gastar (compra) o los VIB a vender (venta). Si el disponible no alcanza, la orden queda Rechazada sin congelar nada.
 4. **Prioridad precio-tiempo.** Primero se ejecuta el mejor precio (la compra más alta, la venta más baja). A igual precio, la orden que llegó primero.
 5. **Precio de ejecución.** Una ejecución ocurre al precio de la orden en reposo. Así, quien llega con un límite mejor que el del libro recibe el precio más favorable.
 6. **Mejora de precio.** Si una compra limit se ejecuta por debajo de su límite, la diferencia congelada vuelve al disponible en ese mismo momento.
@@ -99,16 +112,21 @@ Estas reglas aplican a todas las historias; cada historia las referencia en luga
 
 | Estado | Significado | ¿Está en el libro? |
 | --- | --- | --- |
+| Pendiente (`PENDING`) | Registrada por la API, todavía sin resultado. | No |
+| Rechazada (`REJECTED`) | No se aceptó (por ejemplo, sin fondos). Queda registrada con su motivo. | No |
 | Abierta | Aceptada, sin ejecuciones. | Sí (solo limit) |
 | Parcialmente ejecutada | Tiene ejecuciones y aún le queda cantidad. | Sí (solo limit) |
 | Ejecutada | Toda su cantidad se ejecutó. | No |
 | Cancelada | La canceló la persona o el sistema (market sin liquidez, auto-cruce). Puede tener ejecuciones previas. | No |
 
-Una orden rechazada por validación o falta de saldo no llega a existir: la API devuelve el error y no queda registro de orden.
+Una petición con forma inválida (por ejemplo, cantidad fraccionada) se rechaza con un error y no crea la orden. Una orden con forma válida se registra como Pendiente; si después no tiene fondos, pasa a Rechazada.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Abierta: aceptada
+    [*] --> Pendiente: registrada
+    Pendiente --> Rechazada: sin fondos
+    Pendiente --> Abierta: aceptada
+    Rechazada --> [*]
     Abierta --> ParcialmenteEjecutada: ejecuta una parte
     Abierta --> Ejecutada: se ejecuta toda
     Abierta --> Cancelada: cancelación
@@ -134,7 +152,7 @@ Cada persona tiene exactamente una wallet, con saldo disponible y reservado por 
 
 - Al registrarla, el sistema devuelve un ID único de persona.
 - Se crea automáticamente su wallet con BRL y VIB en cero (disponible y reservado).
-- Todas las demás operaciones reciben ese ID en la petición. Un ID inexistente se rechaza con un error claro.
+- Todas las demás operaciones reciben ese ID en el header `X-User-ID`. Un ID inexistente se rechaza con un error claro.
 
 ### HU-02 · Consultar mi wallet
 
@@ -188,11 +206,11 @@ La persona crea, consulta, modifica y cancela sus órdenes; toda orden aceptada 
 **Criterios de aceptación**
 
 - La persona indica cantidad de VIB (entero ≥ 1) y precio máximo en BRL.
-- Se valida que el BRL disponible cubra cantidad × precio máximo; si no, se rechaza sin crear la orden.
+- Se valida que el BRL disponible cubra cantidad × precio máximo; si no, la orden queda Rechazada.
 - Si se acepta, ese monto queda congelado y la orden busca contraparte de inmediato (HU-12).
 - Nunca se ejecuta a un precio mayor que el máximo. Si se ejecuta más barato, la diferencia vuelve al disponible (regla 6).
 - Lo que no se ejecuta queda en el libro como Abierta o Parcialmente ejecutada.
-- La respuesta devuelve el ID de la orden, su estado y las ejecuciones ocurridas al crearla.
+- La respuesta devuelve el ID de la orden en estado Pendiente. Su resultado y sus ejecuciones se consultan después.
 
 *Ejemplo:* tengo R$ 1.000 disponibles y pido 10 VIB a máximo R$ 90. Se congelan R$ 900. Hay 4 VIB en venta a R$ 85: compro 4 por R$ 340, recupero R$ 20 de mejora de precio y quedan 6 VIB en el libro con R$ 540 congelados.
 
@@ -205,7 +223,7 @@ La persona crea, consulta, modifica y cancela sus órdenes; toda orden aceptada 
 **Criterios de aceptación**
 
 - La persona indica cantidad de VIB (entero ≥ 1) y precio mínimo en BRL.
-- Se valida que el VIB disponible cubra la cantidad; si no, se rechaza sin crear la orden.
+- Se valida que el VIB disponible cubra la cantidad; si no, la orden queda Rechazada.
 - Si se acepta, esa cantidad de VIB queda congelada y la orden busca contraparte de inmediato.
 - Nunca se ejecuta a un precio menor que el mínimo. Si hay compradores que pagan más, se vende a su precio.
 - Lo que no se ejecuta queda en el libro.
@@ -219,7 +237,7 @@ La persona crea, consulta, modifica y cancela sus órdenes; toda orden aceptada 
 **Criterios de aceptación**
 
 - La persona indica el monto en BRL a gastar (> 0).
-- Se valida que el BRL disponible cubra ese monto; si no, se rechaza sin crear la orden.
+- Se valida que el BRL disponible cubra ese monto; si no, la orden queda Rechazada.
 - Se congela el monto y se compra desde la venta más barata hacia arriba, solo en unidades enteras de VIB, mientras el remanente alcance para al menos 1 VIB al siguiente precio.
 - Lo que no se gastó (por falta de oferta o porque no alcanza para 1 VIB más) vuelve al disponible y la orden termina (regla 7).
 - Estado final: Ejecutada si se gastó todo; si no, Cancelada con las ejecuciones que tuvo.
@@ -233,7 +251,7 @@ La persona crea, consulta, modifica y cancela sus órdenes; toda orden aceptada 
 **Criterios de aceptación**
 
 - La persona indica la cantidad de VIB (entero ≥ 1).
-- Se valida que el VIB disponible cubra la cantidad; si no, se rechaza sin crear la orden.
+- Se valida que el VIB disponible cubra la cantidad; si no, la orden queda Rechazada.
 - Se vende desde la compra más alta hacia abajo hasta completar la cantidad o agotar compradores.
 - El VIB no vendido vuelve al disponible y la orden termina.
 
@@ -244,7 +262,7 @@ La persona crea, consulta, modifica y cancela sus órdenes; toda orden aceptada 
 **Criterios de aceptación**
 
 - Lista las órdenes de la persona, más recientes primero, con paginación.
-- Permite filtrar por estado (Abierta, Parcialmente ejecutada, Ejecutada, Cancelada) y por lado (compra/venta).
+- Permite filtrar por estado (Pendiente, Rechazada, Abierta, Parcialmente ejecutada, Ejecutada, Cancelada) y por lado (compra/venta).
 - Cada orden muestra: ID, lado, tipo (market/limit), precio límite, cantidad original, cantidad ejecutada, cantidad pendiente, precio promedio ejecutado, estado y fechas de creación y última actualización.
 - Una persona solo ve sus propias órdenes.
 
@@ -312,7 +330,7 @@ El sistema cruza órdenes por precio y luego por llegada, y cada ejecución inte
 - Los cuatro movimientos ocurren todos o ninguno. No existe un estado intermedio visible.
 - Solo se liquida con saldo ya congelado por la orden; una ejecución nunca toma saldo disponible.
 - Un mismo saldo congelado no puede respaldar dos órdenes a la vez, ni en este libro ni en otro.
-- Lo recibido por una ejecución queda disponible de inmediato para nuevas órdenes o retiros.
+- Lo recibido por una ejecución queda disponible en cuanto la wallet procesa el trade (milisegundos después) para nuevas órdenes o retiros.
 - La suma total de BRL y de VIB en el sistema no cambia por operar; solo cambia con depósitos y retiros.
 - Operaciones simultáneas de la misma persona (dos órdenes, una orden y un retiro) nunca dejan un saldo negativo.
 
@@ -361,7 +379,7 @@ El sistema debe sostener 5.000 operaciones por segundo y, tras cualquier caída,
 | RNF-02 | Durabilidad | Cero pérdida de lo confirmado: toda respuesta exitosa de la API (orden, ejecución, depósito, retiro) sobrevive a una caída. | Una ejecución confirmada que desaparece es pérdida de dinero para alguien. |
 | RNF-03 | Recuperación | Al reiniciar, el libro, las órdenes y los saldos se reconstruyen idénticos al último estado confirmado, sin intervención manual. | Resiliencia a fallos pedida en el requerimiento. |
 | RNF-04 | Sin estados a medias | Una caída durante una ejecución deja la ejecución completa o inexistente, nunca parcial. | Evita doble gasto y descuadres (HU-13). |
-| RNF-05 | Idempotencia | Toda operación que modifica estado acepta una clave de idempotencia; un reintento con la misma clave devuelve el resultado original sin repetir el efecto. | Si la respuesta se pierde por la caída, el cliente reintenta sin crear órdenes ni depósitos duplicados. |
+| RNF-05 | Idempotencia | Los depósitos y retiros aceptan una clave de idempotencia; un reintento con la misma clave devuelve el resultado original sin repetir el efecto. | Si la respuesta se pierde por la caída, el cliente reintenta sin crear órdenes ni depósitos duplicados. |
 | RNF-06 | Consistencia | Un saldo consultado nunca es negativo y siempre cumple total = disponible + reservado. | Base de la confianza en la wallet. |
 | RNF-07 | Determinismo | El mismo orden de entradas produce siempre el mismo libro y las mismas ejecuciones. | Permite auditar y reconstruir el estado. |
 | RNF-08 | Auditabilidad | Todo movimiento de saldo se puede rastrear a un depósito, retiro o ejecución. | Conciliación y soporte ante reclamos. |
@@ -375,8 +393,8 @@ La latencia objetivo por operación y la disponibilidad esperada (tiempo máximo
 
 - BRL usa 2 decimales y el precio de VIB se expresa con 2 decimales.
 - Se puede depositar VIB, pero no retirarlo.
-- Sin autenticación: el ID de persona viaja en la petición y la API confía en él. Esto requiere una red confiable y debe resolverse antes de exponer la API.
-- El libro de órdenes no se publica (ni profundidad ni último precio); cada persona solo ve lo suyo.
+- Sin autenticación: el ID de persona viaja en el header `X-User-ID` y la API confía en él. Esto requiere una red confiable y debe resolverse antes de exponer la API.
+- La profundidad del libro se publica agregada por precio, sin órdenes individuales ni identidades. El último precio no se publica.
 - La ejecución ocurre al precio de la orden en reposo (estándar de mercado).
 
 ### Preguntas abiertas
@@ -384,7 +402,6 @@ La latencia objetivo por operación y la disponibilidad esperada (tiempo máximo
 - [ ] ¿Hay cantidades o montos mínimos y máximos por orden, o un paso mínimo de precio (tick)?
 - [ ] ¿Cuál es la latencia objetivo por operación (por ejemplo, p99 en milisegundos)?
 - [ ] ¿Cuánto tiempo puede estar caído el servicio mientras se recupera?
-- [ ] ¿Se necesita que la persona consulte el libro público o el último precio para decidir sus órdenes?
 - [ ] ¿Hay límite de órdenes abiertas por persona?
 - [ ] ¿Se debe retirar también VIB, o solo BRL?
 - [ ] ¿La persona debe recibir notificaciones (webhook) cuando se ejecuta su orden, o basta con consultar?
