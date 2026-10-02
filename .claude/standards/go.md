@@ -16,7 +16,8 @@ Code is optimized to be easy to read, not short or clever.
 - **Files of at most 300 lines** (`_test.go` files don't count). When a file grows, split it by responsibility: one file per resource or use case (`create_order.go`, `cancel_order.go`), not an `orders.go` with everything.
 - A function does one thing, and its name says what.
 - Early returns instead of chained `else`.
-- Explicit names (`reservedAmount`, not `ra`). A comment explains *why*, not *what*.
+- Explicit names (`reservedAmount`, not `ra`).
+- Comments only when the code cannot explain itself: a non-obvious rule, constraint or reason (*why*, not *what*). No comment that restates a name or summarizes a body, including doc comments on exported identifiers (Go's doc-comment convention does not apply here), package doc comments and comments on test helpers.
 
 ## Tests
 
