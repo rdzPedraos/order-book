@@ -48,24 +48,27 @@ Rules:
 microservices/order-service/
   main.go           wiring: gofr.New(), migrations, routes. No logic.
   migrations/       Gofr migrations
-  handler/          entry points (HTTP routes, Kafka subscribers, gRPC), one file each:
-                    parse input, call service, map errors
-  service/          business rules
+  handlers/         one package per entry point (HTTP route, Kafka subscriber, gRPC method),
+    create-order/   in a kebab-case directory with a package name without dashes (createorder):
+    list-orders/    parses the input, applies the rules of that use case, calls the store
+                    and returns the result or the error
   store/            SQL, pub/sub and other datasources
-  models/           the service's domain types and errors
-  utils/            the service's pure helpers (no state, no I/O)
+  models/           the service's domain types, their JSON and their errors
+  utils/            the service's pure helpers used by several handlers (no state, no I/O)
 ```
+
+There is no separate business-rules layer: a use case's rules live in its handler package, next to the input they validate. A rule needed by several handlers goes to `models` (if it is about a domain type) or `utils` (if it is a pure helper).
 
 ## Dependencies
 
 ```text
-handler → service → store
-   └──────────┴────────┴──→ models, utils, shared
+handlers/<x> → store
+      └─────────┴──→ models, utils, shared
 ```
 
-- Never the other way around: `store` does not import `service`, and `service` does not import `handler`.
-- Each layer defines the interface it consumes (`service` defines `Store`, `handler` defines `Service`), so every layer can be tested with mocks.
-- `*gofr.Context` flows through the layers (it is the Gofr idiom), but only `handler` reads the request (`Bind`, `PathParam`) and only `store` uses the datasources (`ctx.SQL`, pub/sub).
-- Database access is plain Gofr: `store` writes SQL by hand with `ctx.SQL` (`ExecContext`, `QueryContext`, `Select`), migrations use Gofr's `app.Migrate`, and `store` tests use `container.NewMockContainer`. No ORM, no query generator (sqlc) and no generic repository.
+- Never the other way around, and a handler package never imports another handler package.
+- Handlers call the `store` package functions directly (`store.InsertOrder(ctx, order)`), with no interfaces or constructors. `store` keeps the database behind a package-level variable, and its tests and the handler tests replace it with `store.InitMock(t)`: an in-memory database that records what was written (`mock.Orders`), can be seeded with existing rows, and fails every call when `mock.Err` is set.
+- `*gofr.Context` flows to the store (it is the Gofr idiom); only handlers read the request (`Bind`, `PathParam`) and only `store` uses the datasources (`ctx.SQL`, pub/sub).
+- Database access is plain Gofr: `store` writes SQL by hand with `ctx.SQL` (`ExecContext`, `QueryContext`, `Select`), migrations use Gofr's `app.Migrate`, and the SQL itself is tested against PostgreSQL with the `integration` build tag, never with mocks that compare the SQL text. No ORM, no query generator (sqlc) and no generic repository.
 - A service never imports another service. They communicate over HTTP, gRPC or events, with contracts in `shared/events`.
 - `tools/` may import `shared/`; nothing imports `tools/`.
