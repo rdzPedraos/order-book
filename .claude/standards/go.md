@@ -20,27 +20,31 @@ Code is optimized to be easy to read, not short or clever.
 
 ## Tests
 
-- The `_test.go` file sits next to the code, in the same package.
+- The `_test.go` file sits next to the code, in the same package, and is named after the file it mainly tests: `create_order.go` → `create_order_test.go`. Helpers and fakes shared by the whole package go in `<package>_test.go` (`handler_test.go`, `service_test.go`).
 - One explicit `t.Run` per case inside the test function, each with its own inputs and assertions written out. No table of cases iterated with a `for` loop: a reader must see each case without mapping a table row back to the loop body.
+- Assertions use `github.com/stretchr/testify/require` through `c := require.New(t)`, declared first in each `t.Run` (and in each helper, after `t.Helper()`): `c.Equal`, `c.NoError`, `c.ErrorIs`. A failed assertion stops that case. Not `if` plus a hand-formatted message, and not `testify/assert`, which keeps running after a failure.
 - The `t.Run` name describes the spec scenario (`"limit order is created"`).
 - Repeated setup or assertions go into small helpers (`t.Helper()`), not into a loop. Helpers are declared at the top of the test file, above the test functions that use them.
 
   ```go
   func TestNormalize(t *testing.T) {
   	t.Run("lowercase id", func(t *testing.T) {
+  		c := require.New(t)
+
   		got, err := Normalize("brl-vib")
-  		if err != nil || got.ID != "BRL-VIB" {
-  			t.Fatalf("Normalize(brl-vib) = %+v, %v; want BRL-VIB", got, err)
-  		}
+  		c.NoError(err)
+  		c.Equal("BRL-VIB", got.ID)
   	})
 
   	t.Run("tickers in another order", func(t *testing.T) {
-  		if _, err := Normalize("VIB-BRL"); !errors.Is(err, ErrUnknownBook) {
-  			t.Fatalf("Normalize(VIB-BRL) error = %v, want %v", err, ErrUnknownBook)
-  		}
+  		c := require.New(t)
+
+  		_, err := Normalize("VIB-BRL")
+  		c.ErrorIs(err, ErrUnknownBook)
   	})
   }
   ```
 - `handler`: `httptest` for HTTP routes, a Gofr test context for subscribers, with `service` mocked. `service`: `store` mocked. `store`: Gofr's mock container (`container.NewMockContainer`).
+- Coverage: at least 85% of statements per package with logic (`handler`, `service`, `store`, `shared/*`), measured with the unit tests (`go test -cover`). `main`, `migrations` and `models` hold wiring, schema and types and are excluded. A logic package without any test counts as 0%, not as excluded.
 - Integration tests (real database, Kafka) use the `integration` build tag.
 - No `time.Sleep` and no dependence on execution order.
