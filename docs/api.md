@@ -1,6 +1,6 @@
 # Order Book API
 
-REST API to trade on the order book: create and query buy and sell orders.
+REST API to trade on the order book: hold money in a wallet, and create and query buy and sell orders.
 
 ## Base URL
 
@@ -19,12 +19,16 @@ export API=https://<api-host>
 | `GET` | `$API/orders/{orderId}` | [Get one of your orders](#get-one-of-your-orders) |
 | `POST` | `$API/orders/{orderId}/change` | [Request a change to an order](#request-a-change-to-an-order) |
 | `POST` | `$API/orders/{orderId}/close` | [Request the cancellation of an order](#request-the-cancellation-of-an-order) |
+| `GET` | `$API/wallet` | [Get your wallet](#get-your-wallet) |
+| `POST` | `$API/wallet/deposits` | [Deposit](#deposit) |
+| `POST` | `$API/wallet/withdrawals` | [Withdraw](#withdraw) |
+| `GET` | `$API/wallet/movements` | [List your movements](#list-your-movements) |
 
 ## Conventions
 
 ### Identity
 
-Every endpoint requires the `X-User-ID` header, which identifies the person. You only see and operate your own orders: someone else's order answers `404`, exactly like one that does not exist.
+Every endpoint requires the `X-User-ID` header, which identifies the person. You only see and operate your own orders and wallet: someone else's order answers `404`, exactly like one that does not exist. Any `X-User-ID` has a wallet: one that never operated holds zero.
 
 ### Requests
 
@@ -300,3 +304,118 @@ curl -X POST $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538/close -H 'X-User-I
 | Status | Code | When |
 | --- | --- | --- |
 | 404 | `order_not_found` | The order does not exist, is someone else's, or the id is malformed |
+
+## Wallet
+
+Your money, in BRL and VIB. An order only enters the book if what it may need can be frozen first: a limit buy freezes `quantity × limit` in BRL, a market buy its `amount`, and a sell its `quantity` in VIB. Frozen money shows as `reserved` and cannot be withdrawn or used by another order; cancelling the order gives back what it did not use. Without enough `available`, the order is rejected.
+
+### The balance object
+
+```json
+{ "currency": "BRL", "available": "100.00", "reserved": "900.00", "total": "1000.00" }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `available` | What you can withdraw or use in a new order |
+| `reserved` | What is frozen for your open orders |
+| `total` | `available + reserved` |
+
+### Get your wallet
+
+`GET $API/wallet`
+
+```bash
+curl $API/wallet -H 'X-User-ID: user-a'
+```
+
+**Response:** `200 OK`, with one [balance object](#the-balance-object) per currency, BRL first, in `data`:
+
+```json
+{ "data": [
+  { "currency": "BRL", "available": "100.00", "reserved": "900.00", "total": "1000.00" },
+  { "currency": "VIB", "available": "0", "reserved": "0", "total": "0" }
+] }
+```
+
+### Deposit
+
+`POST $API/wallet/deposits`
+
+Adds money to your `available` balance. Deposits are simulated; sending the same request twice deposits twice.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `currency` | string | `BRL` or `VIB` |
+| `amount` | decimal string | How much, in the currency's scale: `"150.00"` BRL, `"10"` VIB |
+
+```bash
+curl -X POST $API/wallet/deposits \
+  -H 'X-User-ID: user-a' -H 'Content-Type: application/json' \
+  -d '{"currency":"BRL","amount":"150.00"}'
+```
+
+**Response:** `201 Created`, with the movement in `data`:
+
+```json
+{ "data": {
+  "movementId": "01a0fdb0-b4ca-766a-a93d-d5a50f96d513",
+  "type": "DEPOSIT",
+  "currency": "BRL",
+  "amount": "150.00",
+  "orderId": null,
+  "createdAt": "2026-10-02T17:36:51.402421Z"
+} }
+```
+
+**Errors**
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `invalid_body` | The body is not valid JSON |
+| 400 | `invalid_currency` | `currency` is not `BRL` or `VIB` |
+| 400 | `invalid_amount` | `amount` is missing, ≤ 0, or has more decimals than the currency allows |
+
+### Withdraw
+
+`POST $API/wallet/withdrawals`
+
+Takes BRL from your `available` balance, never from what is `reserved` for your orders. Only BRL can be withdrawn. Withdrawals are simulated; sending the same request twice withdraws twice.
+
+The body and the response are the same as a [deposit](#deposit), with `"type": "WITHDRAWAL"`.
+
+**Errors**: those of a [deposit](#deposit), and:
+
+| Status | Code | When |
+| --- | --- | --- |
+| 422 | `insufficient_funds` | `amount` is more than your `available` BRL; nothing is withdrawn |
+| 422 | `currency_not_withdrawable` | `currency` is `VIB` |
+
+### List your movements
+
+`GET $API/wallet/movements`
+
+Every deposit, withdrawal, reservation and release of your wallet, newest first, one page at a time.
+
+**Query parameters** (all optional)
+
+| Parameter | Meaning |
+| --- | --- |
+| `from`, `to` | Only movements from `from` (included) to `to` (excluded), RFC 3339: `2026-10-01T00:00:00Z` |
+| `limit` | Page size, 1 to 100; 20 by default |
+| `cursor` | Continue after this `movementId`. Use the `nextCursor` of the previous page |
+
+```bash
+curl "$API/wallet/movements?from=2026-10-01T00:00:00Z&limit=20" -H 'X-User-ID: user-a'
+```
+
+**Response:** `200 OK`, with movements like the one of a [deposit](#deposit) in `data` and the next page's cursor in `metadata`. A reservation (`RESERVE`) or a release (`RELEASE`) carries its `orderId`. On the last page `nextCursor` is `null`.
+
+**Errors**
+
+| Status | Code | When |
+| --- | --- | --- |
+| 400 | `invalid_date` | `from` or `to` is not an RFC 3339 timestamp |
+| 400 | `invalid_limit` | `limit` is not an integer between 1 and 100 |
+| 400 | `invalid_cursor` | `cursor` is not a movement id |
+
