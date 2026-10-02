@@ -8,5 +8,6 @@ func All() map[int64]migration.Migrate {
 	return map[int64]migration.Migrate{
 		20261003000000: createBalances(),
 		20261003000001: createLedger(),
+		20261005000000: addTradeMovements(),
 	}
 }

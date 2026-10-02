@@ -27,6 +27,7 @@ type walletDB interface {
 	withdraw(ctx *gofr.Context, movement models.Movement) error
 	listMovements(ctx *gofr.Context, query MovementQuery) ([]models.Movement, error)
 	applyFundsBatch(ctx *gofr.Context, operations []models.FundsOperation) ([]models.FundsResult, error)
+	applyTrade(ctx *gofr.Context, trade models.Trade) error
 }
 
 type postgres struct{}
@@ -65,6 +66,12 @@ func ListMovements(ctx *gofr.Context, query MovementQuery) ([]models.Movement, e
 // funds again, including a rejected reservation.
 func ApplyFundsBatch(ctx *gofr.Context, operations []models.FundsOperation) ([]models.FundsResult, error) {
 	return db.applyFundsBatch(ctx, operations)
+}
+
+// Moves the trade between buyer and seller and writes it in the ledger, in one
+// transaction. A trade already applied moves nothing.
+func ApplyTrade(ctx *gofr.Context, trade models.Trade) error {
+	return db.applyTrade(ctx, trade)
 }
 
 func fillWalletCurrencies(userID string, stored []models.Balance) []models.Balance {

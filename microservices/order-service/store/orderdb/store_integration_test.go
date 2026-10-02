@@ -128,3 +128,115 @@ func TestInsertOrderTwiceIntegration(t *testing.T) {
 	c.NoError(err)
 	c.Len(orders, 1)
 }
+
+func newPendingOrder(userID string) models.Order {
+	price, quantity := int64(9000), int64(10)
+	createdAt := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+
+	return models.Order{
+		ID: uuid.Must(uuid.NewV7()), UserID: userID, Book: "BRL-VIB", Side: models.SideBuy, Type: models.TypeLimit,
+		Limit: &price, Quantity: &quantity, Status: models.StatusPending, CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+}
+
+func getStatus(c *require.Assertions, ctx *gofr.Context, order models.Order) models.Status {
+	stored, err := GetOrder(ctx, order.UserID, order.ID)
+	c.NoError(err)
+
+	return stored.Status
+}
+
+// The projector reads the commands and the events without an order between
+// them, so the NewOrder and the order's first event can arrive either way.
+func TestFirstEventIntegration(t *testing.T) {
+	ctx := newIntegrationContext(t)
+
+	t.Run("the command before the event", func(t *testing.T) {
+		c := require.New(t)
+		pending := newPendingOrder("integration-" + uuid.NewString())
+		accepted := pending
+		accepted.Status = models.StatusOpen
+
+		c.NoError(InsertOrder(ctx, pending))
+		c.NoError(InsertOrUpdateOrder(ctx, accepted))
+		c.Equal(models.StatusOpen, getStatus(c, ctx, pending))
+	})
+
+	t.Run("the event before the command", func(t *testing.T) {
+		c := require.New(t)
+		pending := newPendingOrder("integration-" + uuid.NewString())
+		accepted := pending
+		accepted.Status = models.StatusOpen
+
+		c.NoError(InsertOrUpdateOrder(ctx, accepted))
+		c.NoError(InsertOrder(ctx, pending))
+		c.Equal(models.StatusOpen, getStatus(c, ctx, pending))
+	})
+
+	t.Run("a repeated first event leaves a later status", func(t *testing.T) {
+		c := require.New(t)
+		pending := newPendingOrder("integration-" + uuid.NewString())
+		accepted := pending
+		accepted.Status = models.StatusOpen
+		c.NoError(InsertOrUpdateOrder(ctx, accepted))
+		c.NoError(UpdateCancelledOrder(ctx, pending.ID, nil, time.Now()))
+
+		c.NoError(InsertOrUpdateOrder(ctx, accepted))
+		c.Equal(models.StatusCancelled, getStatus(c, ctx, pending))
+	})
+}
+
+func TestEngineUpdatesIntegration(t *testing.T) {
+	ctx := newIntegrationContext(t)
+
+	t.Run("a modification and a cancellation of an open order", func(t *testing.T) {
+		c := require.New(t)
+		pending := newPendingOrder("integration-" + uuid.NewString())
+		c.NoError(InsertOrder(ctx, pending))
+
+		c.NoError(UpdateModifiedOrder(ctx, pending.ID, 9200, 4, time.Now()))
+		reason := "no_liquidity"
+		c.NoError(UpdateCancelledOrder(ctx, pending.ID, &reason, time.Now()))
+		c.NoError(UpdateModifiedOrder(ctx, pending.ID, 9900, 9, time.Now()))
+
+		stored, err := GetOrder(ctx, pending.UserID, pending.ID)
+		c.NoError(err)
+		c.Equal([]any{int64(9200), int64(4), models.StatusCancelled, &reason},
+			[]any{*stored.Limit, *stored.Quantity, stored.Status, stored.Reason}, "a final order is not modified")
+	})
+}
+
+func TestInsertTradeIntegration(t *testing.T) {
+	ctx := newIntegrationContext(t)
+
+	t.Run("a repeated trade is added once and fills both orders", func(t *testing.T) {
+		c := require.New(t)
+		buy, sell := newPendingOrder("integration-"+uuid.NewString()), newPendingOrder("integration-"+uuid.NewString())
+		sell.Side, *sell.Quantity = models.SideSell, 4
+		c.NoError(InsertOrder(ctx, buy))
+		c.NoError(InsertOrder(ctx, sell))
+		trade := models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 8500, Quantity: 4, Amount: 34000, CreatedAt: time.Now()}
+
+		c.NoError(InsertTrade(ctx, trade))
+		c.NoError(InsertTrade(ctx, trade))
+
+		storedBuy, err := GetOrder(ctx, buy.UserID, buy.ID)
+		c.NoError(err)
+		c.Equal([]any{models.StatusPartiallyFilled, int64(4), int64(34000)}, []any{storedBuy.Status, storedBuy.FilledQuantity, storedBuy.FilledAmount})
+		c.Equal(models.StatusFilled, getStatus(c, ctx, sell))
+	})
+
+	t.Run("a market buy is filled when its amount is spent", func(t *testing.T) {
+		c := require.New(t)
+		buy, sell := newPendingOrder("integration-"+uuid.NewString()), newPendingOrder("integration-"+uuid.NewString())
+		amount := int64(30000)
+		buy.Type, buy.Limit, buy.Quantity, buy.Amount = models.TypeMarket, nil, nil, &amount
+		sell.Side = models.SideSell
+		c.NoError(InsertOrder(ctx, buy))
+		c.NoError(InsertOrder(ctx, sell))
+
+		c.NoError(InsertTrade(ctx, models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 10000, Quantity: 3, Amount: 30000, CreatedAt: time.Now()}))
+
+		c.Equal(models.StatusFilled, getStatus(c, ctx, buy))
+	})
+}

@@ -14,8 +14,8 @@ Services talk through the log (Redpanda, Kafka API) with `shared/eventlog`: the 
 | Route | Published by | What it says |
 | --- | --- | --- |
 | `orders.commands.NewOrder`, `ModifyOrder`, `CancelOrder` | OrderService (`api`) | A person asked to create, change or cancel an order |
-| `orders.events.OrderAccepted` | MatchingEngine | The order's funds were frozen; a limit order rests in the book |
-| `orders.events.OrderRejected` | MatchingEngine | `reason`: `insufficient_funds` or `invalid_amount` |
+| `orders.events.OrderAccepted` | MatchingEngine | The order's funds were frozen; a limit order rests in the book. Carries the order's details (`side`, `type`, `limit`, `quantity`, `amount`) |
+| `orders.events.OrderRejected` | MatchingEngine | `reason`: `insufficient_funds` or `invalid_amount`. Carries the order's details, like `OrderAccepted` |
 | `orders.events.OrderCancelled` | MatchingEngine | `cancelledQuantity` and `released`; `reason` is `no_liquidity` for a market order's remainder, empty when the person cancelled |
 | `orders.events.OrderModified` | MatchingEngine | The new `limit` and `quantity` |
 | `orders.events.TradeExecuted` | MatchingEngine | One cross: both orders and people, the maker's side and price, the quantity and what the buyer pays |

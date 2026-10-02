@@ -20,18 +20,10 @@ const (
 	TypeMarket OrderType = "MARKET"
 )
 
-type Status string
-
-const (
-	StatusPending Status = "PENDING"
-)
-
-func IsValidStatus(status Status) bool {
-	return status == StatusPending
-}
-
-// Limit and Amount are in the book's quote currency, Quantity and
-// FilledQuantity in its base asset. Nil means "not applicable".
+// Limit, Amount and FilledAmount are in the book's quote currency, Quantity
+// and FilledQuantity in its base asset. Nil means "not applicable".
+// FilledAmount is what the order's trades paid or received. Reason is the
+// engine's, for a rejected or cancelled order.
 type Order struct {
 	ID             uuid.UUID
 	UserID         string
@@ -42,8 +34,9 @@ type Order struct {
 	Amount         *int64
 	Quantity       *int64
 	FilledQuantity int64
-	AvgPrice       *int64
+	FilledAmount   int64
 	Status         Status
+	Reason         *string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

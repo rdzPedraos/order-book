@@ -114,20 +114,26 @@ func applyNewOrder(ctx *gofr.Context, current *batch, applied *command) error {
 
 	if prepared.err != nil || current.reservations[applied.record.Message.ID] != walletclient.ResultOK {
 		current.emit(ctx, applied, events.RouteOrderRejected, newOrder.OrderID, newOrder.UserID, func(header events.EventHeader) any {
-			return events.OrderRejected{EventHeader: header, Reason: getRejectionReason(prepared)}
+			return events.OrderRejected{EventHeader: header, OrderDetails: buildOrderDetails(newOrder), Reason: getRejectionReason(prepared)}
 		})
 
 		return nil
 	}
 
 	current.emit(ctx, applied, events.RouteOrderAccepted, newOrder.OrderID, newOrder.UserID, func(header events.EventHeader) any {
-		return events.OrderAccepted{EventHeader: header}
+		return events.OrderAccepted{EventHeader: header, OrderDetails: buildOrderDetails(newOrder)}
 	})
 
 	order := buildOrder(prepared, applied.sequence)
 	crossOrder(ctx, current, applied, &order)
 
 	return nil
+}
+
+func buildOrderDetails(newOrder events.NewOrder) events.OrderDetails {
+	return events.OrderDetails{
+		Side: newOrder.Side, Type: newOrder.Type, Limit: newOrder.Limit, Quantity: newOrder.Quantity, Amount: newOrder.Amount,
+	}
 }
 
 func getRejectionReason(prepared *preparedOrder) string {

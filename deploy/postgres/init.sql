@@ -3,3 +3,4 @@
 -- CREATE DATABASE here and is applied with: docker compose down -v && docker compose up -d
 CREATE DATABASE order_service;
 CREATE DATABASE wallet_service;
+CREATE DATABASE market_service;

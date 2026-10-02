@@ -302,3 +302,29 @@ func TestHandle(t *testing.T) {
 		c.Equal([]string{events.RouteOrderAccepted}, getRoutes(log))
 	})
 }
+
+func TestOrderDetailsInFirstEvent(t *testing.T) {
+	t.Run("an accepted order with its details", func(t *testing.T) {
+		c := require.New(t)
+		wallet, log := setUp(t)
+		wallet.Deposit("ana", money.BRL, 90000)
+
+		c.NoError(Handle(newContext(t), toBatch(limitBuy(c, "ana", 10, 9000))))
+
+		var accepted events.OrderAccepted
+		c.NoError(getOrderEvents(log)[0].ParsePayload(&accepted))
+		c.Equal(events.OrderDetails{Side: "BUY", Type: "LIMIT", Limit: ptr(int64(9000)), Quantity: ptr(int64(10))}, accepted.OrderDetails)
+	})
+
+	t.Run("a rejected order with its details", func(t *testing.T) {
+		c := require.New(t)
+		_, log := setUp(t)
+		amount := int64(50000)
+
+		c.NoError(Handle(newContext(t), toBatch(newOrder(c, events.NewOrder{UserID: "ana", Side: "BUY", Type: "MARKET", Amount: &amount}))))
+
+		var rejected events.OrderRejected
+		c.NoError(getOrderEvents(log)[0].ParsePayload(&rejected))
+		c.Equal(events.OrderDetails{Side: "BUY", Type: "MARKET", Amount: &amount}, rejected.OrderDetails)
+	})
+}

@@ -277,3 +277,78 @@ func TestConcurrencyIntegration(t *testing.T) {
 		c.GreaterOrEqual(balances[0].Reserved, int64(0))
 	})
 }
+
+func reserveFor(c *require.Assertions, ctx *gofr.Context, userID string, currency money.Currency, orderID uuid.UUID, amount int64) {
+	c.NoError(Deposit(ctx, deposit(userID, currency, amount)))
+
+	reserve := fundsOperation(models.MovementReserve, userID, amount)
+	reserve.Currency, reserve.OrderID = currency, orderID
+	c.Equal(models.ResultOK, applyOne(c, ctx, reserve))
+}
+
+func getBalancesOf(c *require.Assertions, ctx *gofr.Context, userID string) []models.Balance {
+	balances, err := GetBalances(ctx, userID)
+	c.NoError(err)
+
+	return balances
+}
+
+// A buy of 10 VIB at R$ 90.00 trades 4 at R$ 85.00 and is cancelled: the
+// engine frees R$ 560.00 (the price improvement and the rest) and the trade
+// takes R$ 340.00, so either order leaves R$ 560.00 available and nothing
+// reserved. Answers the buyer's BRL balance.
+func applyReleaseAndTrade(c *require.Assertions, ctx *gofr.Context, releaseFirst bool) models.Balance {
+	trade := newTrade(newUserID(), newUserID(), 4, 34000)
+	reserveFor(c, ctx, trade.BuyerID, money.BRL, trade.BuyOrderID, 90000)
+	reserveFor(c, ctx, trade.SellerID, money.VIB, trade.SellOrderID, 4)
+	release := fundsOperation(models.MovementRelease, trade.BuyerID, 56000)
+	release.OrderID = trade.BuyOrderID
+
+	if releaseFirst {
+		c.Equal(models.ResultOK, applyOne(c, ctx, release))
+		c.NoError(ApplyTrade(ctx, trade))
+	} else {
+		c.NoError(ApplyTrade(ctx, trade))
+		c.Equal(models.ResultOK, applyOne(c, ctx, release))
+	}
+
+	balance := getBalancesOf(c, ctx, trade.BuyerID)[0]
+	c.Zero(balance.Reserved)
+
+	return balance
+}
+
+func TestApplyTradeIntegration(t *testing.T) {
+	ctx := newIntegrationContext(t)
+
+	t.Run("a repeated trade moves both sides once", func(t *testing.T) {
+		c := require.New(t)
+		trade := newTrade(newUserID(), newUserID(), 2, 19000)
+		reserveFor(c, ctx, trade.BuyerID, money.BRL, trade.BuyOrderID, 19000)
+		reserveFor(c, ctx, trade.SellerID, money.VIB, trade.SellOrderID, 2)
+
+		c.NoError(ApplyTrade(ctx, trade))
+		c.NoError(ApplyTrade(ctx, trade))
+
+		c.Equal([]models.Balance{
+			{UserID: trade.BuyerID, Currency: money.BRL},
+			{UserID: trade.BuyerID, Currency: money.VIB, Available: 2},
+		}, getBalancesOf(c, ctx, trade.BuyerID))
+		c.Equal([]models.Balance{
+			{UserID: trade.SellerID, Currency: money.BRL, Available: 19000},
+			{UserID: trade.SellerID, Currency: money.VIB},
+		}, getBalancesOf(c, ctx, trade.SellerID))
+	})
+
+	t.Run("the release before the trade", func(t *testing.T) {
+		c := require.New(t)
+
+		c.Equal(int64(56000), applyReleaseAndTrade(c, ctx, true).Available)
+	})
+
+	t.Run("the trade before the release", func(t *testing.T) {
+		c := require.New(t)
+
+		c.Equal(int64(56000), applyReleaseAndTrade(c, ctx, false).Available)
+	})
+}

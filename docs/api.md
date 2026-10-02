@@ -1,6 +1,6 @@
 # Order Book API
 
-REST API to trade on the order book: hold money in a wallet, and create and query buy and sell orders.
+REST API to trade on the order book: hold money in a wallet, create and query buy and sell orders, and see the depth of the market.
 
 ## Base URL
 
@@ -23,12 +23,13 @@ export API=https://<api-host>
 | `POST` | `$API/wallet/deposits` | [Deposit](#deposit) |
 | `POST` | `$API/wallet/withdrawals` | [Withdraw](#withdraw) |
 | `GET` | `$API/wallet/movements` | [List your movements](#list-your-movements) |
+| `GET` | `$API/market/orderbook/{book}` | [Get the depth of a book](#get-the-depth-of-a-book) |
 
 ## Conventions
 
 ### Identity
 
-Every endpoint requires the `X-User-ID` header, which identifies the person. You only see and operate your own orders and wallet: someone else's order answers `404`, exactly like one that does not exist. Any `X-User-ID` has a wallet: one that never operated holds zero.
+Every endpoint except the market's requires the `X-User-ID` header, which identifies the person. You only see and operate your own orders and wallet: someone else's order answers `404`, exactly like one that does not exist. Any `X-User-ID` has a wallet: one that never operated holds zero.
 
 ### Requests
 
@@ -62,6 +63,8 @@ Send the book id exactly as listed above; letter case does not matter (`brl-vib`
 ### Reads after a write
 
 Creating, changing or cancelling an order is accepted as soon as it is safely recorded, and the orders you read are updated right after, usually within a few milliseconds. In that window a `GET`, `change` or `close` of an order you just created can answer `404 order_not_found`: retry after a moment.
+
+What happens to an order after that comes the same way, a few milliseconds after the book applies it: its `status`, what it executed, the VIB or BRL a trade gives you in your wallet, and the depth of the market.
 
 ### Errors
 
@@ -115,7 +118,19 @@ Every orders endpoint returns orders in this shape:
 | `filledQuantity` | VIB already executed; `"0"` while nothing is executed |
 | `pendingQuantity` | `quantity − filledQuantity`; `null` when `quantity` is `null` |
 | `avgPrice` | Average executed price in BRL; `null` while nothing is executed |
-| `status` | Every new order is `PENDING` |
+| `status` | See below |
+| `reason` | Why the order was `REJECTED` or `CANCELLED`, when the book gave a reason; `null` otherwise |
+
+| `status` | Meaning |
+| --- | --- |
+| `PENDING` | Recorded, not yet in the book. A market order stays `PENDING` until it is filled or cancelled |
+| `OPEN` | A limit order resting in the book, nothing executed |
+| `PARTIALLY_FILLED` | A limit order with part of its `quantity` executed; the rest still rests in the book |
+| `FILLED` | All of its `quantity` executed; a market buy, all of its `amount` spent |
+| `CANCELLED` | You cancelled it, or nothing was left to execute a market order against (`reason`: `no_liquidity`); what it executed before stays executed |
+| `REJECTED` | Never entered the book (`reason`: `insufficient_funds` or `invalid_amount`) |
+
+`FILLED`, `CANCELLED` and `REJECTED` are final: the order never changes again.
 | `createdAt`, `updatedAt` | RFC 3339 timestamps in UTC |
 
 ### Create an order
@@ -197,7 +212,7 @@ Your orders, most recent first, one page at a time.
 
 | Parameter | Meaning |
 | --- | --- |
-| `status` | Only orders in this status (`PENDING`) |
+| `status` | Only orders in this [status](#the-order-object) |
 | `side` | Only `BUY` or only `SELL` orders |
 | `book` | Only orders of this book |
 | `limit` | Page size, 1 to 100; 20 by default |
@@ -259,7 +274,7 @@ curl $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538 -H 'X-User-ID: user-a'
 
 `POST $API/orders/{orderId}/change`
 
-Asks to change the `limit` and/or the pending `quantity` of one of your limit orders. The change is applied asynchronously: the response is `201` with the order **as it is now, unchanged**, and the order shows the new values once the change is applied. A change can be rejected if the order was filled first.
+Asks to change the `limit` and/or the pending `quantity` of one of your limit orders. The change is applied asynchronously: the response is `201` with the order **as it is now, unchanged**, and the order shows the new values once the change is applied. If the order was filled or cancelled first, the change has no effect.
 
 **Body:** `limit` and/or `quantity`, validated with the same rules as [Create an order](#create-an-order).
 
@@ -289,9 +304,9 @@ Asks to cancel one of your orders. The cancellation is applied asynchronously, b
 
 - **cancelled**: nothing had been executed;
 - **cancelled in part**: what was already executed stays executed, and the rest is cancelled;
-- **rejected**: the order was already filled, so there is nothing to cancel.
+- **no effect**: the order was already filled or cancelled, and stays as it was.
 
-Sending the same request twice is safe: the second one is rejected because the order is already cancelled.
+Sending the same request twice is safe: the second one has no effect.
 
 ```bash
 curl -X POST $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538/close -H 'X-User-ID: user-a'
@@ -395,7 +410,7 @@ The body and the response are the same as a [deposit](#deposit), with `"type": "
 
 `GET $API/wallet/movements`
 
-Every deposit, withdrawal, reservation and release of your wallet, newest first, one page at a time.
+Every deposit, withdrawal, reservation, release and trade of your wallet, newest first, one page at a time.
 
 **Query parameters** (all optional)
 
@@ -409,7 +424,7 @@ Every deposit, withdrawal, reservation and release of your wallet, newest first,
 curl "$API/wallet/movements?from=2026-10-01T00:00:00Z&limit=20" -H 'X-User-ID: user-a'
 ```
 
-**Response:** `200 OK`, with movements like the one of a [deposit](#deposit) in `data` and the next page's cursor in `metadata`. A reservation (`RESERVE`) or a release (`RELEASE`) carries its `orderId`. On the last page `nextCursor` is `null`.
+**Response:** `200 OK`, with movements like the one of a [deposit](#deposit) in `data` and the next page's cursor in `metadata`. A reservation (`RESERVE`), a release (`RELEASE`) and each side of a trade carry their `orderId`: in a trade you have a `TRADE_PAID`, what left your `reserved` balance, and a `TRADE_RECEIVED`, what entered your `available` one in the other currency. On the last page `nextCursor` is `null`.
 
 **Errors**
 
@@ -418,4 +433,41 @@ curl "$API/wallet/movements?from=2026-10-01T00:00:00Z&limit=20" -H 'X-User-ID: u
 | 400 | `invalid_date` | `from` or `to` is not an RFC 3339 timestamp |
 | 400 | `invalid_limit` | `limit` is not an integer between 1 and 100 |
 | 400 | `invalid_cursor` | `cursor` is not a movement id |
+
+## Market
+
+The public view of each book: what is offered at each price, without orders or people. It needs no `X-User-ID`.
+
+### Get the depth of a book
+
+`GET $API/market/orderbook/{book}`
+
+The best buys (`bids`, highest price first) and the best sells (`asks`, lowest price first), each price with the VIB resting there and how many orders.
+
+**Query parameters**
+
+| Parameter | Meaning |
+| --- | --- |
+| `depth` | Prices per side, 1 to 100; 20 by default |
+
+```bash
+curl "$API/market/orderbook/BRL-VIB?depth=5"
+```
+
+**Response:** `200 OK`, with the book in `data`:
+
+```json
+{ "data": {
+  "book": "BRL-VIB",
+  "bids": [{ "price": "100.00", "volume": "30", "orders": 2 }, { "price": "99.00", "volume": "15", "orders": 1 }],
+  "asks": [{ "price": "101.00", "volume": "5", "orders": 1 }]
+} }
+```
+
+**Errors**
+
+| Status | Code | When |
+| --- | --- | --- |
+| 404 | `book_not_found` | The book does not exist |
+| 400 | `invalid_depth` | `depth` is not an integer between 1 and 100 |
 

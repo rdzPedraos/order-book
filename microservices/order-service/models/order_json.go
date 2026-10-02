@@ -20,6 +20,7 @@ type orderJSON struct {
 	PendingQuantity *string   `json:"pendingQuantity"`
 	AvgPrice        *string   `json:"avgPrice"`
 	Status          Status    `json:"status"`
+	Reason          *string   `json:"reason"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 }
@@ -41,7 +42,12 @@ func (o Order) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 
-	avgPrice, err := formatOptionalAmount(book.Quote, o.AvgPrice)
+	averagePrice, err := o.getAveragePrice(book.Base)
+	if err != nil {
+		return nil, err
+	}
+
+	avgPrice, err := formatOptionalAmount(book.Quote, averagePrice)
 	if err != nil {
 		return nil, err
 	}
@@ -73,9 +79,24 @@ func (o Order) MarshalJSON() ([]byte, error) {
 		PendingQuantity: pendingQuantity,
 		AvgPrice:        avgPrice,
 		Status:          o.Status,
+		Reason:          o.Reason,
 		CreatedAt:       o.CreatedAt,
 		UpdatedAt:       o.UpdatedAt,
 	})
+}
+
+// Nil while nothing was executed.
+func (o Order) getAveragePrice(base money.Currency) (*int64, error) {
+	if o.FilledQuantity == 0 {
+		return nil, nil
+	}
+
+	average, err := money.AveragePrice(base, o.FilledAmount, o.FilledQuantity)
+	if err != nil {
+		return nil, err
+	}
+
+	return &average, nil
 }
 
 // Nil for a market buy by amount.

@@ -161,3 +161,33 @@ func (m *Mock) getOrCreateBalance(userID string, currency money.Currency) *model
 
 	return &m.Balances[len(m.Balances)-1]
 }
+
+func (m *Mock) applyTrade(_ *gofr.Context, trade models.Trade) error {
+	if m.Err != nil {
+		return m.Err
+	}
+
+	for _, movement := range m.Movements {
+		if movement.Type == models.MovementTradePaid && *movement.MessageID == trade.MessageID {
+			return nil
+		}
+	}
+
+	movements, err := trade.BuildMovements()
+	if err != nil {
+		return err
+	}
+
+	for _, movement := range movements {
+		balance := m.getOrCreateBalance(movement.UserID, movement.Currency)
+		if movement.Type == models.MovementTradePaid {
+			balance.Reserved -= movement.Amount
+		} else {
+			balance.Available += movement.Amount
+		}
+	}
+
+	m.Movements = append(m.Movements, movements...)
+
+	return nil
+}

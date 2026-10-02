@@ -96,6 +96,7 @@ const limitOrderJSON = `{
 	"pendingQuantity": "10",
 	"avgPrice": null,
 	"status": "PENDING",
+	"reason": null,
 	"createdAt": "2026-10-01T12:00:00Z",
 	"updatedAt": "2026-10-01T12:00:00Z"
 }`

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"gofr.dev/pkg/gofr"
@@ -13,6 +14,7 @@ import (
 
 type Mock struct {
 	Orders []models.Order
+	Trades []models.Trade
 	Err    error
 }
 
@@ -55,6 +57,92 @@ func (m *Mock) getOrder(_ *gofr.Context, userID string, id uuid.UUID) (models.Or
 	}
 
 	return models.Order{}, models.ErrOrderNotFound
+}
+
+func (m *Mock) insertOrUpdateOrder(ctx *gofr.Context, order models.Order) error {
+	stored := m.findOrder(order.ID)
+	if m.Err != nil || stored == nil {
+		return m.insertOrder(ctx, order)
+	}
+
+	if stored.Status == models.StatusPending {
+		stored.Status, stored.Reason, stored.UpdatedAt = order.Status, order.Reason, order.UpdatedAt
+	}
+
+	return nil
+}
+
+func (m *Mock) updateCancelledOrder(_ *gofr.Context, id uuid.UUID, reason *string, cancelledAt time.Time) error {
+	if m.Err != nil {
+		return m.Err
+	}
+
+	if stored := m.findOrder(id); stored != nil && !stored.Status.IsFinal() {
+		stored.Status, stored.Reason, stored.UpdatedAt = models.StatusCancelled, reason, cancelledAt
+	}
+
+	return nil
+}
+
+func (m *Mock) updateModifiedOrder(_ *gofr.Context, id uuid.UUID, limit, pendingQuantity int64, modifiedAt time.Time) error {
+	if m.Err != nil {
+		return m.Err
+	}
+
+	if stored := m.findOrder(id); stored != nil && !stored.Status.IsFinal() {
+		quantity := stored.FilledQuantity + pendingQuantity
+		stored.Limit, stored.Quantity, stored.UpdatedAt = &limit, &quantity, modifiedAt
+	}
+
+	return nil
+}
+
+func (m *Mock) insertTrade(_ *gofr.Context, trade models.Trade) error {
+	if m.Err != nil {
+		return m.Err
+	}
+
+	for _, recorded := range m.Trades {
+		if recorded.ID == trade.ID {
+			return nil
+		}
+	}
+
+	m.Trades = append(m.Trades, trade)
+
+	for _, id := range []uuid.UUID{trade.BuyOrderID, trade.SellOrderID} {
+		if stored := m.findOrder(id); stored != nil && !stored.Status.IsFinal() {
+			addTrade(stored, trade)
+		}
+	}
+
+	return nil
+}
+
+// The same rule as addTradeToOrder.
+func addTrade(order *models.Order, trade models.Trade) {
+	order.FilledQuantity += trade.Quantity
+	order.FilledAmount += trade.Amount
+	order.UpdatedAt = trade.CreatedAt
+
+	isMarketBuy := order.Type == models.TypeMarket && order.Side == models.SideBuy
+
+	switch {
+	case isMarketBuy && order.FilledAmount >= *order.Amount, !isMarketBuy && order.FilledQuantity >= *order.Quantity:
+		order.Status = models.StatusFilled
+	case order.Type == models.TypeLimit:
+		order.Status = models.StatusPartiallyFilled
+	}
+}
+
+func (m *Mock) findOrder(id uuid.UUID) *models.Order {
+	for i := range m.Orders {
+		if m.Orders[i].ID == id {
+			return &m.Orders[i]
+		}
+	}
+
+	return nil
 }
 
 func (m *Mock) listOrders(_ *gofr.Context, query ListQuery) ([]models.Order, error) {

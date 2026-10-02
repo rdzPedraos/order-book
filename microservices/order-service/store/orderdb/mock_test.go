@@ -3,6 +3,7 @@ package orderdb
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -113,5 +114,125 @@ func TestMockListOrders(t *testing.T) {
 
 		_, err := ListOrders(&gofr.Context{}, ListQuery{UserID: "user-a", Limit: 10})
 		c.ErrorIs(err, mock.Err)
+	})
+}
+
+func withStatus(stored models.Order, status models.Status) models.Order {
+	stored.Status = status
+
+	return stored
+}
+
+func TestMockInsertOrUpdateOrder(t *testing.T) {
+	t.Run("an order not stored yet is inserted with its status", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		accepted := withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen)
+
+		c.NoError(InsertOrUpdateOrder(&gofr.Context{}, accepted))
+		c.Equal([]models.Order{accepted}, mock.Orders)
+	})
+
+	t.Run("a pending order takes the event's status", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.Orders = []models.Order{order(1, "user-a", models.SideBuy)}
+		rejected := withStatus(order(1, "user-a", models.SideBuy), models.StatusRejected)
+		rejected.Reason = ptr("insufficient_funds")
+
+		c.NoError(InsertOrUpdateOrder(&gofr.Context{}, rejected))
+		c.Equal([]models.Order{rejected}, mock.Orders)
+	})
+
+	t.Run("an order out of pending is left as it is", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		filled := withStatus(order(1, "user-a", models.SideBuy), models.StatusFilled)
+		mock.Orders = []models.Order{filled}
+
+		c.NoError(InsertOrUpdateOrder(&gofr.Context{}, withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen)))
+		c.Equal([]models.Order{filled}, mock.Orders)
+	})
+}
+
+func TestMockUpdateCancelledOrder(t *testing.T) {
+	t.Run("an order not final is cancelled with its reason", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.Orders = []models.Order{withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen)}
+
+		c.NoError(UpdateCancelledOrder(&gofr.Context{}, uuid.UUID{15: 1}, ptr("no_liquidity"), time.Time{}))
+		c.Equal(models.StatusCancelled, mock.Orders[0].Status)
+		c.Equal(ptr("no_liquidity"), mock.Orders[0].Reason)
+	})
+
+	t.Run("a final order is left as it is", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		filled := withStatus(order(1, "user-a", models.SideBuy), models.StatusFilled)
+		mock.Orders = []models.Order{filled}
+
+		c.NoError(UpdateCancelledOrder(&gofr.Context{}, uuid.UUID{15: 1}, nil, time.Time{}))
+		c.Equal([]models.Order{filled}, mock.Orders)
+	})
+}
+
+func TestMockUpdateModifiedOrder(t *testing.T) {
+	t.Run("the quantity is what was executed plus what is pending", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		partial := withStatus(order(1, "user-a", models.SideBuy), models.StatusPartiallyFilled)
+		partial.FilledQuantity = 4
+		mock.Orders = []models.Order{partial}
+
+		c.NoError(UpdateModifiedOrder(&gofr.Context{}, uuid.UUID{15: 1}, 9200, 2, time.Time{}))
+		c.Equal(ptr(int64(9200)), mock.Orders[0].Limit)
+		c.Equal(ptr(int64(6)), mock.Orders[0].Quantity)
+	})
+
+	t.Run("a final order is left as it is", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		cancelled := withStatus(order(1, "user-a", models.SideBuy), models.StatusCancelled)
+		mock.Orders = []models.Order{cancelled}
+
+		c.NoError(UpdateModifiedOrder(&gofr.Context{}, uuid.UUID{15: 1}, 9200, 2, time.Time{}))
+		c.Equal([]models.Order{cancelled}, mock.Orders)
+	})
+
+	t.Run("an unavailable database", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.Err = errors.New("connection refused")
+
+		c.ErrorIs(InsertOrUpdateOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)), mock.Err)
+		c.ErrorIs(UpdateCancelledOrder(&gofr.Context{}, uuid.UUID{15: 1}, nil, time.Time{}), mock.Err)
+		c.ErrorIs(UpdateModifiedOrder(&gofr.Context{}, uuid.UUID{15: 1}, 9200, 2, time.Time{}), mock.Err)
+	})
+}
+
+func TestMockInsertTrade(t *testing.T) {
+	t.Run("a trade adds to both orders once", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		buy, sell := withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen), withStatus(order(2, "user-b", models.SideSell), models.StatusOpen)
+		buy.Type, sell.Type, buy.Quantity, sell.Quantity = models.TypeLimit, models.TypeLimit, ptr(int64(10)), ptr(int64(4))
+		mock.Orders = []models.Order{buy, sell}
+		trade := models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 9000, Quantity: 4, Amount: 36000}
+
+		c.NoError(InsertTrade(&gofr.Context{}, trade))
+		c.NoError(InsertTrade(&gofr.Context{}, trade))
+
+		c.Equal([]models.Trade{trade}, mock.Trades)
+		c.Equal([]any{models.StatusPartiallyFilled, int64(4), int64(36000)}, []any{mock.Orders[0].Status, mock.Orders[0].FilledQuantity, mock.Orders[0].FilledAmount})
+		c.Equal(models.StatusFilled, mock.Orders[1].Status)
+	})
+
+	t.Run("an unavailable database", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.Err = errors.New("connection refused")
+
+		c.ErrorIs(InsertTrade(&gofr.Context{}, models.Trade{}), mock.Err)
 	})
 }

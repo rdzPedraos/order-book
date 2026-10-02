@@ -38,12 +38,25 @@ type EventHeader struct {
 	UserID        string    `json:"userId"`
 }
 
+// The order as it arrived in its NewOrder, on the first event of each order:
+// a reader that gets the event before the command can store the whole order.
+// Its creation time is the event's createdAt, which is the command's.
+type OrderDetails struct {
+	Side     string `json:"side"`
+	Type     string `json:"type"`
+	Limit    *int64 `json:"limit,string,omitempty"`
+	Quantity *int64 `json:"quantity,string,omitempty"`
+	Amount   *int64 `json:"amount,string,omitempty"`
+}
+
 type OrderAccepted struct {
 	EventHeader
+	OrderDetails
 }
 
 type OrderRejected struct {
 	EventHeader
+	OrderDetails
 	Reason string `json:"reason"`
 }
 

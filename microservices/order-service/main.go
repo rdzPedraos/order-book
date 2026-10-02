@@ -2,7 +2,7 @@
 //
 // It runs in one of two roles, set by ROLE: api publishes each order, change
 // and close as a command to the log; projector reads the log into the orders
-// table. They are deployed apart because they scale apart. Matching an order
+// table: the commands create the orders and the engine's events update them. They are deployed apart because they scale apart. Matching an order
 // against the book is the matching engine's job.
 package main
 
@@ -11,6 +11,11 @@ import (
 
 	"gofr.dev/pkg/gofr"
 
+	applyorderaccepted "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-accepted"
+	applyordercancelled "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-cancelled"
+	applyordermodified "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-modified"
+	applyorderrejected "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-rejected"
+	applytradeexecuted "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-trade-executed"
 	changeorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/change-order"
 	closeorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/close-order"
 	createorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/create-order"
@@ -64,6 +69,11 @@ func runProjector(app *gofr.App, brokers []string) {
 	app.OnStart(func(ctx *gofr.Context) error {
 		return consumer.Start(ctx, brokers, app.Config.Get("COMMAND_LOG_GROUP"), ctx.Logger,
 			consumer.Subscribe(events.RouteNewOrder, insertneworder.Handle),
+			consumer.Subscribe(events.RouteOrderAccepted, applyorderaccepted.Handle),
+			consumer.Subscribe(events.RouteOrderRejected, applyorderrejected.Handle),
+			consumer.Subscribe(events.RouteOrderCancelled, applyordercancelled.Handle),
+			consumer.Subscribe(events.RouteOrderModified, applyordermodified.Handle),
+			consumer.Subscribe(events.RouteTradeExecuted, applytradeexecuted.Handle),
 		)
 	})
 }

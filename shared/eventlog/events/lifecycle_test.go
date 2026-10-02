@@ -50,6 +50,30 @@ func TestLifecycleRoundTrip(t *testing.T) {
 		assertRoundTrip(require.New(t), RouteOrderRejected, OrderRejected{EventHeader: header(7, 0), Reason: ReasonInsufficientFunds})
 	})
 
+	t.Run("an accepted order carries its details", func(t *testing.T) {
+		assertRoundTrip(require.New(t), RouteOrderAccepted, OrderAccepted{
+			EventHeader:  header(7, 0),
+			OrderDetails: OrderDetails{Side: "BUY", Type: "LIMIT", Limit: ptr(int64(9000)), Quantity: ptr(int64(10))},
+		})
+	})
+
+	t.Run("a rejected market buy carries its amount", func(t *testing.T) {
+		assertRoundTrip(require.New(t), RouteOrderRejected, OrderRejected{
+			EventHeader: header(7, 0), Reason: ReasonInsufficientFunds,
+			OrderDetails: OrderDetails{Side: "BUY", Type: "MARKET", Amount: ptr(int64(50000))},
+		})
+	})
+
+	t.Run("the details travel as decimal strings next to the header", func(t *testing.T) {
+		c := require.New(t)
+
+		message, err := NewEventMessage(RouteOrderAccepted, "BRL-VIB", commandID, 0, createdAt, OrderAccepted{
+			OrderDetails: OrderDetails{Side: "BUY", Type: "LIMIT", Limit: ptr(int64(9000)), Quantity: ptr(int64(10))},
+		})
+		c.NoError(err)
+		c.Contains(string(message.Payload), `"side":"BUY","type":"LIMIT","limit":"9000","quantity":"10"`)
+	})
+
 	t.Run("order cancelled", func(t *testing.T) {
 		assertRoundTrip(require.New(t), RouteOrderCancelled, OrderCancelled{
 			EventHeader: header(7, 0), CancelledQuantity: 6, Released: 54000, Reason: ReasonNoLiquidity,
