@@ -29,7 +29,7 @@ go test ./shared/...                    # tests for shared packages
 gofmt -l .                              # unformatted Go files (must be empty)
 go tool gocyclo -over 9 .               # functions with complexity >= 10 (must be empty)
 go list -f '{{if not .Doc}}{{.ImportPath}}{{end}}' ./... | grep .   # packages without a package comment (must be empty)
-go test -tags integration -cover ./... | awk '/coverage:/ && $2 !~ /\/(models|migrations)$/ { c=$5; sub("%","",c); if (c+0 < 85) { print; low=1 } } END { exit low }'   # packages under 85% (must be empty; needs the compose PostgreSQL)
+go test -cover ./... | awk '/coverage:/ && $2 !~ /\/(models|migrations)$/ { c=$5; sub("%","",c); if (c+0 < 85) { print; low=1 } } END { exit low }'   # packages under 85% (must be empty; unit tests, as in CI)
 docker compose -f deploy/docker-compose.yml up -d   # local PostgreSQL (services read configs/.env, copied from configs/.env.example)
-go test -tags integration ./microservices/<service>/...  # integration tests against the compose services
+go test -tags integration ./microservices/<service>/...  # integration tests against the compose PostgreSQL
 ```

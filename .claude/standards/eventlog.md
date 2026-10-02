@@ -27,3 +27,7 @@ consumer.Start(ctx, brokers, group, ctx.Logger,
 - Delivery is at least once: a message is committed only after its handler returns `nil`, and an error retries the same message, so return an error only when retrying can succeed (a store failure). A payload that can never be applied is logged and skipped (`return nil`).
 - Handlers are idempotent, because a message can arrive twice: write with `ON CONFLICT … DO NOTHING` or check the message `id`.
 - A route nobody subscribed to is committed without being handled. There is no order across topics: a handler that needs something another topic creates returns an error until it exists.
+
+## Tests
+
+`producer` and `consumer` are unit tests against `kfake` (`github.com/twmb/franz-go/pkg/kfake`), the in-memory Kafka of franz-go: one cluster per package in `TestMain`, and each test creates its own topic. It speaks the real protocol (acks, idempotent producer, consumer groups and commits) without Docker, so the guarantees above are tested in CI without a broker. Handlers do not touch Kafka: they use `producer.InitMock(t)`.

@@ -1,23 +1,36 @@
-//go:build integration
-
 package consumer
 
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kfake"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/rdzpedraos/order-book/shared/eventlog/events"
 	"github.com/rdzpedraos/order-book/shared/eventlog/producer"
 )
 
-const brokers = "localhost:19092"
+// Every test talks to one in-memory Kafka cluster, and creates its own topics.
+var brokers string
+
+func TestMain(m *testing.M) {
+	cluster, err := kfake.NewCluster(kfake.NumBrokers(1))
+	if err != nil {
+		panic(err)
+	}
+
+	brokers = cluster.ListenAddrs()[0]
+	code := m.Run()
+	cluster.Close()
+	os.Exit(code)
+}
 
 type silentLogger struct{}
 
@@ -38,7 +51,7 @@ func createTopic(t *testing.T) string {
 	c := require.New(t)
 
 	admin, err := kgo.NewClient(kgo.SeedBrokers(brokers))
-	c.NoError(err, "run docker compose -f deploy/docker-compose.yml up -d")
+	c.NoError(err)
 	defer admin.Close()
 
 	topic := "consumer-test-" + uuid.NewString()
