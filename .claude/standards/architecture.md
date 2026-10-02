@@ -3,13 +3,19 @@
 ## Monorepo
 
 ```text
-go.work
-modules/            shared, stable libraries (one Go module)
-services/<name>/    one Go module per microservice
+go.mod / go.sum     the only Go module of the repo (github.com/rdzpedraos/order-book)
+modules/            shared, stable libraries
+services/<name>/    one microservice each (main.go + internal/)
 deploy/             docker-compose, Helm
 docs/               api.md and documentation
 tools/              tooling (loadgen, etc.)
 ```
+
+- One Go module at the root, with a single `go.mod` and `go.sum`. No `go.work`, no per-service `go.mod`, no `replace`.
+- Import paths are the full path from the module root: `github.com/rdzpedraos/order-book/modules/money`, `github.com/rdzpedraos/order-book/services/order-service/internal/service`.
+- Isolation between services comes from Go's `internal/` rule: `services/<x>/internal/...` can only be imported from inside `services/<x>/`. Every service package other than `main` lives under `internal/`.
+- `go build ./...`, `go test ./...` and `go mod tidy` run from the root.
+- A service image copies `go.mod`, `go.sum`, `modules/` and `services/<x>/`, and runs `go build ./services/<x>`, so one service is built and deployed without the others.
 
 ## modules/
 
