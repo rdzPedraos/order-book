@@ -28,6 +28,8 @@ Rules:
 
 - No service business logic and no access to a service's database.
 - Never imports anything from `microservices/`.
+- Framework-agnostic: never imports Gofr or any other framework. Only the standard library (`net/http`, `context`, `errors`, ...) and, if justified, small stable libraries. HTTP helpers are plain `func(http.Handler) http.Handler` middlewares that services register with `app.UseMiddleware`.
+- Returns sentinel errors, never HTTP responses (except a middleware such as `identity`, which follows the error format in `docs/api.md`). Each service's `handler` maps them to status and code.
 - Changes are backward compatible (add, don't break). A breaking change requires an OpenSpec change.
 - When in doubt, the code goes in the service. Promote it to `shared/` when a second service needs it.
 
@@ -64,5 +66,6 @@ handler → service → store
 - Never the other way around: `store` does not import `service`, and `service` does not import `handler`.
 - Each layer defines the interface it consumes (`service` defines `Store`, `handler` defines `Service`), so every layer can be tested with mocks.
 - `*gofr.Context` flows through the layers (it is the Gofr idiom), but only `handler` reads the request (`Bind`, `PathParam`) and only `store` uses the datasources (`ctx.SQL`, pub/sub).
+- Database access is plain Gofr: `store` writes SQL by hand with `ctx.SQL` (`ExecContext`, `QueryContext`, `Select`), migrations use Gofr's `app.Migrate`, and `store` tests use `container.NewMockContainer`. No ORM, no query generator (sqlc) and no generic repository.
 - A service never imports another service. They communicate over HTTP, gRPC or events, with contracts in `shared/events`.
 - `tools/` may import `shared/`; nothing imports `tools/`.

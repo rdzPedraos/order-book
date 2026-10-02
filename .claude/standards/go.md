@@ -5,7 +5,7 @@
 - `gofmt` is mandatory (a hook applies it on every edit).
 - Stdlib and Gofr first. A new dependency is justified as a decision in `design.md`.
 - Errors: wrap with `fmt.Errorf("...: %w", err)`. Domain errors are sentinels in `models`. Only `handler` maps them to a response (HTTP status in the `docs/api.md` format).
-- Money is always `int64` via `shared/money`, never `float64`.
+- Money is always `int64` in the currency's minimal unit via `shared/money`, never `float64`. The number of decimals comes from the per-currency registry in `shared/money`, never from a hardcoded factor like `* 100`. Amounts travel as decimal strings in JSON.
 - No mutable globals and no `panic` in a request path. Configuration is read from env through Gofr's config.
 
 ## Readability
