@@ -45,11 +45,8 @@ docs/api.md
   Agregar una moneda (por ejemplo COP con 0 o 2 decimales) es una entrada en ese registro, sin cambiar la lógica.
 - **Precio:** se expresa en unidades mínimas de la moneda quote por 1 unidad de la base. En `BRL-VIB`, `9000` = R$ 90,00 por 1 VIB.
 - **API:** los montos viajan como strings decimales (`"90.00"`). `money.Parse(currency, s)` valida contra la escala de la moneda: rechaza más decimales que los permitidos, negativos y valores fuera de rango, y `money.Format(currency, v)` arma el texto. Se usan strings porque un número JSON se lee como `float64` en muchos clientes (por ejemplo, JavaScript).
-- **Aritmética:** suma, resta y multiplicación de enteros son exactas. `money.Notional(qty, price)` calcula el monto en la quote con detección de overflow, y rechaza el resultado si supera el rango de `int64`.
-  - **Hoy (base entera):** en `BRL-VIB` la base es VIB (0 decimales) y el precio ya está en centavos de BRL por 1 VIB, así que el monto es directo: `10 × 9000 = 90000` centavos (R$ 900,00). Los decimales del BRL no agregan ningún paso, porque ya están dentro del precio.
-  - **Si mañana una base tiene decimales** (por ejemplo, un activo divisible en 10⁻⁸): la cantidad viene en fracciones y el precio sigue siendo por 1 unidad entera, así que el monto es `qty × price / 10^decimales_base`. El producto intermedio puede superar `int64` aunque el resultado quepa, y por eso se calcula en 128 bits (`math/bits.Mul64`) antes de dividir. El valor guardado sigue siendo `int64`.
-- **Rango:** `int64` llega a ~9,2 × 10¹⁸ unidades mínimas, unos 92.000 billones de BRL. El límite práctico está en `qty × price`, no en los saldos.
-- **Redondeo:** solo existe en valores informativos, como el precio promedio ejecutado (`total / qty`), que se redondea half-up a la unidad mínima de la quote. Ningún saldo, reserva ni liquidación se calcula a partir de un valor redondeado.
+- **Moneda desconocida:** `Parse` y `Format` obtienen la escala con `currency.Decimals()`, que devuelve `money.ErrUnknownCurrency` si la moneda no está en el registro. Ninguna conversión usa una escala por defecto.
+- **Aritmética:** esta fase solo parsea y formatea montos; no multiplica ni divide. La aritmética entre monedas (el monto de una cantidad a un precio, la cantidad que alcanza un monto, el precio promedio) llega con quien la usa, en las fases 3 y 4, y recibe la moneda base para reescalar con sus decimales en vez de suponer que es entera.
 - **Base de datos:** columnas `BIGINT`, con la moneda implícita en la columna (`limit_price` y `amount` en la quote, `quantity` en la base).
 - **Alternativa descartada:** `float64`, por los errores de redondeo (`0.1 + 0.2 != 0.3`). También una librería decimal (`shopspring/decimal`, `math/big`): es exacta, pero reserva memoria en cada operación y es mucho más lenta que un `int64` en el hot path del engine.
 
@@ -58,7 +55,7 @@ docs/api.md
 `shared/books` define los books válidos, configurados en código. Cada uno tiene su identificador (`BRL-VIB`) y sus monedas base y quote (VIB y BRL).
 
 - **`books.Normalize(input string) (Book, error)`:** pasa a mayúsculas y busca el resultado en el registro, sin reordenar nada: `VIB-BRL` no es `BRL-VIB`. Devuelve el `Book` (identificador canónico, base y quote) o el error sentinela `books.ErrUnknownBook`.
-- **Errores:** `shared/` no conoce HTTP. Solo devuelve errores sentinela (`books.ErrUnknownBook`, y en `money` errores como `money.ErrTooManyDecimals` o `money.ErrOverflow`), y es el `handler` de cada servicio el que los mapea a la respuesta: `400` con código `unknown_book`, `invalid_quantity`, etc.
+- **Errores:** `shared/` no conoce HTTP. Solo devuelve errores sentinela (`books.ErrUnknownBook`, y en `money` errores como `money.ErrTooManyDecimals` o `money.ErrUnknownCurrency`), y es el `handler` de cada servicio el que los mapea a la respuesta: `400` con código `unknown_book`, `invalid_quantity`, etc.
 - **Uso:** toda entrada de la API (body, query y path) pasa por `Normalize`, y solo el identificador configurado se guarda, se publica y se devuelve.
 - **Por qué sin reordenar:** el book se identifica por lo que está configurado, no por una regla sobre el nombre. Así no hay dos formas válidas de escribir el mismo book, y la base y la quote salen del registro, no del orden del nombre.
 

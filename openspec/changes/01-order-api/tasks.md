@@ -7,7 +7,7 @@
 
 ## 2. Paquetes compartidos
 
-- [x] 2.1 `shared/money`: escribir tests table-driven por moneda (BRL con 2 decimales, VIB con 0) de decimales de más, negativos, cero, fuera de rango, round-trip `Parse`/`Format`, overflow en `Notional(qty, price)` y redondeo half-up del promedio, y verlos fallar; implementar el registro de monedas con su escala, `Parse`, `Format`, `Notional` y el promedio redondeado sobre `int64`; refactor en verde
+- [x] 2.1 `shared/money`: escribir tests por moneda (BRL con 2 decimales, VIB con 0) de decimales de más, negativos, cero, fuera de rango, moneda desconocida y round-trip `Parse`/`Format`, y verlos fallar; implementar el registro de monedas con su escala (`Currency.Decimals()`, con `ErrUnknownCurrency`), `Parse` y `Format` sobre `int64`; refactor en verde
 - [x] 2.2 `shared/books`: escribir tests de que `brl-vib` y `BRL-VIB` devuelven `BRL-VIB` y de que `VIB-BRL` y un book desconocido devuelven error, y verlos fallar; implementar el registro (`BRL-VIB`, base VIB, quote BRL) y `Normalize`; refactor en verde
 - [x] 2.3 `shared/identity`: escribir el test HTTP del escenario «Header ausente» (`order-management`) y verlo fallar; implementar con solo `net/http` y `context` (sin importar Gofr) el middleware estándar que exige `X-User-ID` y lo inyecta en el contexto; refactor en verde
 
