@@ -21,7 +21,26 @@ Code is optimized to be easy to read, not short or clever.
 ## Tests
 
 - The `_test.go` file sits next to the code, in the same package.
-- Table-driven with `t.Run`. The case name describes the spec scenario (`"limit order is created"`).
+- One explicit `t.Run` per case inside the test function, each with its own inputs and assertions written out. No table of cases iterated with a `for` loop: a reader must see each case without mapping a table row back to the loop body.
+- The `t.Run` name describes the spec scenario (`"limit order is created"`).
+- Repeated setup or assertions go into small helpers (`t.Helper()`), not into a loop. Helpers are declared at the top of the test file, above the test functions that use them.
+
+  ```go
+  func TestNormalize(t *testing.T) {
+  	t.Run("lowercase id", func(t *testing.T) {
+  		got, err := Normalize("brl-vib")
+  		if err != nil || got.ID != "BRL-VIB" {
+  			t.Fatalf("Normalize(brl-vib) = %+v, %v; want BRL-VIB", got, err)
+  		}
+  	})
+
+  	t.Run("tickers in another order", func(t *testing.T) {
+  		if _, err := Normalize("VIB-BRL"); !errors.Is(err, ErrUnknownBook) {
+  			t.Fatalf("Normalize(VIB-BRL) error = %v, want %v", err, ErrUnknownBook)
+  		}
+  	})
+  }
+  ```
 - `handler`: `httptest` for HTTP routes, a Gofr test context for subscribers, with `service` mocked. `service`: `store` mocked. `store`: Gofr's mock container (`container.NewMockContainer`).
 - Integration tests (real database, Kafka) use the `integration` build tag.
 - No `time.Sleep` and no dependence on execution order.
