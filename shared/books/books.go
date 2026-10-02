@@ -27,7 +27,7 @@ func Normalize(input string) (Book, error) {
 }
 
 func lookup(id string) (Book, error) {
-	book, ok := registry()[id]
+	book, ok := registry[id]
 	if !ok {
 		return Book{}, ErrUnknownBook
 	}
