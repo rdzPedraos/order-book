@@ -11,9 +11,9 @@ func assertParsed(t *testing.T, currency Currency, input string, want int64) {
 
 	c := require.New(t)
 
-	got, err := Parse(currency, input)
+	got, err := Parse(currency, &input)
 	c.NoError(err, "Parse(%s, %q)", currency, input)
-	c.Equal(want, got, "Parse(%s, %q)", currency, input)
+	c.Equal(want, *got, "Parse(%s, %q)", currency, input)
 }
 
 func assertParseError(t *testing.T, currency Currency, input string, wantErr error) {
@@ -21,7 +21,7 @@ func assertParseError(t *testing.T, currency Currency, input string, wantErr err
 
 	c := require.New(t)
 
-	_, err := Parse(currency, input)
+	_, err := Parse(currency, &input)
 	c.ErrorIs(err, wantErr, "Parse(%s, %q)", currency, input)
 }
 
@@ -40,11 +40,11 @@ func assertRoundTrip(t *testing.T, currency Currency, value string) {
 
 	c := require.New(t)
 
-	amount, err := Parse(currency, value)
+	amount, err := Parse(currency, &value)
 	c.NoError(err, "Parse(%s, %q)", currency, value)
 
-	formatted, err := Format(currency, amount)
-	c.NoError(err, "Format(%s, %d)", currency, amount)
+	formatted, err := Format(currency, *amount)
+	c.NoError(err, "Format(%s, %d)", currency, *amount)
 	c.Equal(value, formatted, "round trip of %q", value)
 }
 
@@ -63,6 +63,13 @@ func TestParse(t *testing.T) {
 	t.Run("not a number", func(t *testing.T) { assertParseError(t, BRL, "abc", ErrInvalidFormat) })
 	t.Run("dot without decimals", func(t *testing.T) { assertParseError(t, BRL, "90.", ErrInvalidFormat) })
 	t.Run("unknown currency", func(t *testing.T) { assertParseError(t, Currency("XYZ"), "1", ErrUnknownCurrency) })
+	t.Run("value not sent", func(t *testing.T) {
+		c := require.New(t)
+
+		amount, err := Parse(BRL, nil)
+		c.NoError(err)
+		c.Nil(amount)
+	})
 }
 
 func TestFormat(t *testing.T) {

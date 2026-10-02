@@ -10,8 +10,8 @@ Es la API pública con la que cada persona envía, modifica, cancela y consulta 
 `POST /orders` MUST recibir `book`, `side` y, según la orden, `limit`, `quantity` o `amount`; validar la forma, generar un `orderId` en el servidor, guardar la orden con `status = PENDING` y responder `201` con la orden creada. El tipo de orden no se envía: es `LIMIT` si viene `limit` y `MARKET` si no, y la respuesta lo informa en `type`.
 
 #### Scenario: Orden limit creada
-- **WHEN** la persona envía `{"book":"BRL-VIB","side":"BUY","limit":"90.00","quantity":10}`
-- **THEN** el sistema responde `201` con un `orderId` nuevo, `type = LIMIT`, `status = PENDING`, `filledQuantity = 0` y `avgPrice = null`
+- **WHEN** la persona envía `{"book":"BRL-VIB","side":"BUY","limit":"90.00","quantity":"10"}`
+- **THEN** el sistema responde `201` con un `orderId` nuevo, `type = LIMIT`, `status = PENDING`, `filledQuantity = "0"` y `avgPrice = null`
 
 #### Scenario: Envío repetido
 - **WHEN** la persona envía dos veces la misma petición
@@ -33,22 +33,22 @@ Todo endpoint de órdenes MUST identificar a la persona mediante el header `X-Us
 - **THEN** el sistema responde `404`, sin revelar que la orden existe
 
 ### Requirement: Validación de forma
-El sistema MUST rechazar con `400`, sin crear la orden, toda petición con: book desconocido; `side` distinto de `BUY`/`SELL`; `limit` con más decimales que la moneda del precio o ≤ 0; `quantity` no entera o menor a 1; `amount` con más decimales que la moneda o ≤ 0; o una combinación de campos distinta de estas: con `limit`, `quantity` (compra o venta); sin `limit`, `amount` para comprar y `quantity` para vender.
+El sistema MUST rechazar con `400`, sin crear la orden, toda petición con: book desconocido; `side` distinto de `BUY`/`SELL`; `limit` con más decimales que la moneda del precio o ≤ 0; `quantity` no entera o menor a 1; `amount` con más decimales que la moneda o ≤ 0; o una combinación de campos distinta de estas: con `limit`, `quantity` (compra o venta); sin `limit`, `amount` para comprar y `quantity` para vender. Una combinación no permitida se responde con `unsupported_order`.
 
 #### Scenario: Limit sin cantidad
 - **WHEN** se envía `{"book":"BRL-VIB","side":"SELL","limit":"95.00"}`
-- **THEN** el sistema responde `400` con código `invalid_quantity`
+- **THEN** el sistema responde `400` con código `unsupported_order`
 
 #### Scenario: Limit con monto
 - **WHEN** se envía `{"book":"BRL-VIB","side":"BUY","limit":"90.00","amount":"500.00"}`
-- **THEN** el sistema responde `400` con código `invalid_amount`
+- **THEN** el sistema responde `400` con código `unsupported_order`
 
 #### Scenario: Venta market por monto
 - **WHEN** se envía `{"book":"BRL-VIB","side":"SELL","amount":"500.00"}`
-- **THEN** el sistema responde `400` con código `invalid_amount`
+- **THEN** el sistema responde `400` con código `unsupported_order`
 
 #### Scenario: Cantidad fraccionada
-- **WHEN** se envía `{"book":"BRL-VIB","side":"BUY","limit":"90.00","quantity":2.5}`
+- **WHEN** se envía `{"book":"BRL-VIB","side":"BUY","limit":"90.00","quantity":"2.5"}`
 - **THEN** el sistema responde `400` con código `invalid_quantity`
 
 #### Scenario: Book desconocido

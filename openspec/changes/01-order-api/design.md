@@ -44,7 +44,7 @@ docs/api.md
 
   Agregar una moneda (por ejemplo COP con 0 o 2 decimales) es una entrada en ese registro, sin cambiar la lógica.
 - **Precio:** se expresa en unidades mínimas de la moneda quote por 1 unidad de la base. En `BRL-VIB`, `9000` = R$ 90,00 por 1 VIB.
-- **API:** los montos viajan como strings decimales (`"90.00"`). `money.Parse(currency, s)` valida contra la escala de la moneda: rechaza más decimales que los permitidos, negativos y valores fuera de rango, y `money.Format(currency, v)` arma el texto. Se usan strings porque un número JSON se lee como `float64` en muchos clientes (por ejemplo, JavaScript).
+- **API:** los montos y las cantidades viajan como strings decimales (`"90.00"`, `"10"`), también en el request. `money.Parse(currency, s)` valida contra la escala de la moneda: rechaza más decimales que los permitidos, negativos y valores fuera de rango, y `money.Format(currency, v)` arma el texto. Se usan strings porque un número JSON se lee como `float64` en muchos clientes (por ejemplo, JavaScript).
 - **Moneda desconocida:** `Parse` y `Format` obtienen la escala con `currency.Decimals()`, que devuelve `money.ErrUnknownCurrency` si la moneda no está en el registro. Ninguna conversión usa una escala por defecto.
 - **Aritmética:** esta fase solo parsea y formatea montos; no multiplica ni divide. La aritmética entre monedas (el monto de una cantidad a un precio, la cantidad que alcanza un monto, el precio promedio) llega con quien la usa, en las fases 3 y 4, y recibe la moneda base para reescalar con sus decimales en vez de suponer que es entera.
 - **Base de datos:** columnas `BIGINT`, con la moneda implícita en la columna (`limit_price` y `amount` en la quote, `quantity` en la base).

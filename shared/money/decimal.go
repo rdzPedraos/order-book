@@ -8,37 +8,43 @@ import (
 )
 
 // Never goes through float64.
-func Parse(c Currency, input string) (int64, error) {
+func Parse(c Currency, value *string) (*int64, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	input := *value
+
 	decimals, err := c.Decimals()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if strings.HasPrefix(input, "-") {
-		return 0, ErrNegative
+		return nil, ErrNegative
 	}
 
 	whole, fraction, err := splitDecimal(input)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if len(fraction) > decimals {
-		return 0, ErrTooManyDecimals
+		return nil, ErrTooManyDecimals
 	}
 
 	digits := whole + fraction + strings.Repeat("0", decimals-len(fraction))
 
 	amount, err := strconv.ParseInt(digits, 10, 64)
 	if errors.Is(err, strconv.ErrRange) {
-		return 0, ErrOutOfRange
+		return nil, ErrOutOfRange
 	}
 
 	if err != nil {
-		return 0, ErrInvalidFormat
+		return nil, ErrInvalidFormat
 	}
 
-	return amount, nil
+	return &amount, nil
 }
 
 func Format(c Currency, amount int64) (string, error) {
