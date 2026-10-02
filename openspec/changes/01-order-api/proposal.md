@@ -6,7 +6,7 @@ Fase 1 de 8. Crear el monorepo Go + Gofr y la API REST de órdenes (OrderService
 
 ## Why
 
-El PRD ([docs/PDR/order-book-vibranium.md](../../../docs/PDR/order-book-vibranium.md)) y la solución técnica empiezan por la puerta de entrada: la API pública de órdenes. Construirla primero fija el contrato con los clientes (formato de dinero, validaciones, identidad y estados), del que dependen las demás fases. Además permite probarla sola, sin otra infraestructura que la base de datos.
+Según el PRD ([docs/PDR/order-book-vibranium.md](../../../docs/PDR/order-book-vibranium.md)), la puerta de entrada al sistema es la API pública de órdenes, así que esta fase empieza por ahí. Construirla primero fija el contrato con los clientes (formato de dinero, validaciones, identidad y estados), del que dependen las demás fases. Además permite probarla sola, sin otra infraestructura que la base de datos.
 
 ## Goals
 
@@ -46,7 +46,7 @@ Ninguna.
 
 ## Impact
 
-- **Código nuevo:** `go.mod`, `shared/*`, `microservices/order-service`, más los esqueletos de los demás servicios.
+- **Código nuevo:** `go.mod`, `shared/*`, `microservices/order-service`.
 - **Infra:** `deploy/docker-compose.yml` (PostgreSQL).
 - **Docs:** `docs/api.md` (nuevo) y `docs/PDR/order-book-vibranium.md` (ajustes).
 - **Dependencias:** Gofr y el driver de PostgreSQL.

@@ -8,7 +8,7 @@ El repositorio es greenfield: solo existen el PRD ([docs/PDR/order-book-vibraniu
 
 **Goals:**
 
-- Dejar el esqueleto del monorepo y los paquetes compartidos.
+- Dejar la estructura del monorepo con OrderService y los paquetes compartidos. Los demás servicios se crean en la fase que los usa.
 - Una API de órdenes simple: cada endpoint lee o escribe la tabla `orders`.
 
 ## Decisions
@@ -20,10 +20,6 @@ go.mod / go.sum      módulo único github.com/rdzpedraos/order-book
 shared/        money, books, identity
 microservices/
   order-service/
-  wallet-service/      (esqueleto)
-  matching-engine/     (esqueleto)
-  market-service/      (esqueleto)
-tools/loadgen/         (esqueleto)
 deploy/docker-compose.yml
 docs/api.md
 ```
@@ -54,17 +50,17 @@ docs/api.md
   - **Si mañana una base tiene decimales** (por ejemplo, un activo divisible en 10⁻⁸): la cantidad viene en fracciones y el precio sigue siendo por 1 unidad entera, así que el monto es `qty × price / 10^decimales_base`. El producto intermedio puede superar `int64` aunque el resultado quepa, y por eso se calcula en 128 bits (`math/bits.Mul64`) antes de dividir. El valor guardado sigue siendo `int64`.
 - **Rango:** `int64` llega a ~9,2 × 10¹⁸ unidades mínimas, unos 92.000 billones de BRL. El límite práctico está en `qty × price`, no en los saldos.
 - **Redondeo:** solo existe en valores informativos, como el precio promedio ejecutado (`total / qty`), que se redondea half-up a la unidad mínima de la quote. Ningún saldo, reserva ni liquidación se calcula a partir de un valor redondeado.
-- **Base de datos:** columnas `BIGINT`, con la moneda implícita en la columna (`price` y `quote_amount` en la quote, `quantity` en la base).
+- **Base de datos:** columnas `BIGINT`, con la moneda implícita en la columna (`limit_price` y `amount` en la quote, `quantity` en la base).
 - **Alternativa descartada:** `float64`, por los errores de redondeo (`0.1 + 0.2 != 0.3`). También una librería decimal (`shopspring/decimal`, `math/big`): es exacta, pero reserva memoria en cada operación y es mucho más lenta que un `int64` en el hot path del engine.
 
 ### D3. Registro de books
 
-`shared/books` define los books válidos. Cada uno tiene su identificador canónico (los tickers en orden alfabético: `BRL-VIB`) y sus monedas base y quote (VIB y BRL).
+`shared/books` define los books válidos, configurados en código. Cada uno tiene su identificador (`BRL-VIB`) y sus monedas base y quote (VIB y BRL).
 
-- **`books.Normalize(input string) (Book, error)`:** pasa a mayúsculas, separa por `-`, ordena los dos tickers y busca el resultado en el registro. Devuelve el `Book` (identificador canónico, base y quote) o el error sentinela `books.ErrUnknownBook`.
+- **`books.Normalize(input string) (Book, error)`:** pasa a mayúsculas y busca el resultado en el registro, sin reordenar nada: `VIB-BRL` no es `BRL-VIB`. Devuelve el `Book` (identificador canónico, base y quote) o el error sentinela `books.ErrUnknownBook`.
 - **Errores:** `shared/` no conoce HTTP. Solo devuelve errores sentinela (`books.ErrUnknownBook`, y en `money` errores como `money.ErrTooManyDecimals` o `money.ErrOverflow`), y es el `handler` de cada servicio el que los mapea a la respuesta: `400` con código `unknown_book`, `invalid_quantity`, etc.
-- **Uso:** toda entrada de la API (body, query y path) pasa por `Normalize`, y solo el identificador canónico se guarda, se publica y se devuelve.
-- **Por qué alfabético:** da un único nombre por par, sin importar cómo lo escriba el cliente. La base y la quote salen del registro, no del orden del nombre.
+- **Uso:** toda entrada de la API (body, query y path) pasa por `Normalize`, y solo el identificador configurado se guarda, se publica y se devuelve.
+- **Por qué sin reordenar:** el book se identifica por lo que está configurado, no por una regla sobre el nombre. Así no hay dos formas válidas de escribir el mismo book, y la base y la quote salen del registro, no del orden del nombre.
 
 ### D4. Identidad y aislamiento
 
@@ -81,9 +77,9 @@ docs/api.md
 
 Columnas:
 
-- `id` (UUIDv7), `user_id`, `book`, `side` y `type`;
-- `price` (nulo en market) y `quote_amount` (solo en market buy), en unidades mínimas de la quote, y `quantity` en unidades mínimas de la base, todos `BIGINT`;
-- `filled_quantity` y `avg_price` (en cero en esta fase);
+- `id` (UUIDv7), `user_id`, `book`, `side` y `type` (deducido: `LIMIT` si hay `limit`, `MARKET` si no);
+- `limit_price` (el `limit` de la API; nulo en market, y se llama así porque `limit` es palabra reservada de SQL) y `amount` (solo en market buy), en unidades mínimas de la quote, y `quantity` en unidades mínimas de la base, todos `BIGINT`;
+- `filled_quantity` (`BIGINT NOT NULL DEFAULT 0`: al crear no hay nada ejecutado) y `avg_price` (`BIGINT NULL`: queda en `NULL` mientras la orden no tenga ejecuciones, porque no hay precio que promediar);
 - `status`, `created_at` y `updated_at`.
 
 Índice `orders_by_user (user_id, id DESC)` para el listado.
@@ -117,13 +113,20 @@ Cada `POST /orders` crea una orden nueva. Un reintento tras perder la respuesta 
 | Capa | Componente | Responsabilidad |
 | --- | --- | --- |
 | `handler` | `create_order.go`, `list_orders.go`, `get_order.go`, `modify_order.go` y `cancel_order.go` (stubs) | Bind del JSON, parseo de dinero con `shared/money` y del book con `books.Normalize`, mapeo de los errores sentinela (de `shared/` y de `models`) a status y código |
-| `service` | un archivo por caso de uso, como en `handler` | Reglas de la orden: combinaciones válidas de `side`/`type`/precio/cantidad |
+| `service` | un archivo por caso de uso, como en `handler` | Reglas de la orden: combinaciones válidas de `side`, `limit`, `quantity` y `amount`, y el `type` deducido |
 | `store` | `orders.go` | SQL de `orders`: insert, listado con `cursor`/`limit` y filtros, y lectura propia |
 | `models` | `order.go`, `errors.go` | `Order`, `Status` y los errores de dominio (`ErrOrderNotFound` y los errores de validación) |
 | `migrations` | `orders` | Tabla e índice de D5 |
 
 - La validación de forma vive en `service`, no en `handler`, para testearla sin HTTP.
 - `service` define la interface `Store` y `handler` la interface `Service`; cada capa se testea con la de abajo mockeada.
+
+### D10. Aserciones de tests con testify
+
+- **Decisión:** los tests usan `github.com/stretchr/testify/assert` (`assert.Equal`, `assert.NoError`, `assert.ErrorIs`) en lugar de `if` con `t.Error`.
+- **Por qué:** cada comprobación queda en una línea y, si falla, testify imprime el valor esperado y el obtenido sin escribir un mensaje a mano.
+- **Costo:** ya está en `go.mod` como dependencia indirecta de Gofr; pasa a ser directa, sin sumar un módulo nuevo.
+- **Alternativa descartada:** solo la librería estándar (`if` + `t.Errorf`), que obliga a formatear cada mensaje de fallo.
 
 ## Risks / Trade-offs
 
