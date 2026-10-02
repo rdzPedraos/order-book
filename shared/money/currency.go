@@ -33,6 +33,7 @@ var (
 	ErrTooManyDecimals = fault.New("too_many_decimals", "too many decimals for currency")
 	ErrNegative        = fault.New("negative_amount", "negative amount")
 	ErrOutOfRange      = fault.New("amount_out_of_range", "amount out of range")
+	ErrOverflow        = fault.New("amount_overflow", "amount too large to compute")
 )
 
 func (c Currency) GetDecimals() (int, error) {
