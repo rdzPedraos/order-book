@@ -16,18 +16,18 @@ context: |
 
   Standards (mandatory, source of truth):
   - CLAUDE.md: TDD and project rules
-  - .claude/standards/architecture.md: monorepo, service layers, modules/
+  - .claude/standards/architecture.md: monorepo, service layers, shared/
   - .claude/standards/go.md
 
-  Shared Go packages live in modules/ (not pkg/), only if 2+ services use them and they are stable.
+  Shared Go packages live in shared/ (not pkg/ or modules/), only if 2+ services use them and they are stable.
 
 rules:
   proposal:
     - Reference existing patterns before inventing new ones
     - Add tabs tldr, goals, assumptions, concepts tab if needed
   design:
-    - State the layer and path of each new component (handler, service, store, models, utils, modules)
-    - Justify anything placed in modules/ and any new third-party dependency
+    - State the layer and path of each new component (handler, service, store, models, utils, shared)
+    - Justify anything placed in shared/ and any new third-party dependency
   tasks:
     - Write behaviour tasks test-first - failing test for the named spec scenarios, then implementation, then refactor
     - Scaffolding and infra tasks state the command that verifies them

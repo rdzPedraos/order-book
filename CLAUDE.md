@@ -22,7 +22,7 @@ PDRs (Product Development Requests) live in `docs/PDR/`, one file per product. T
 
 ```bash
 go test ./services/<service>/...   # tests for one service
-go test ./modules/...              # tests for modules
+go test ./shared/...              # tests for shared packages
 gofmt -l .                         # unformatted Go files (must be empty)
 gocyclo -over 9 .                  # functions with complexity >= 10 (must be empty)
 ```
