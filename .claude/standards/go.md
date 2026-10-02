@@ -17,7 +17,8 @@ Code is optimized to be easy to read, not short or clever.
 - A function does one thing, and its name says what.
 - Early returns instead of chained `else`.
 - Explicit names (`reservedAmount`, not `ra`).
-- Comments only when the code cannot explain itself: a non-obvious rule, constraint or reason (*why*, not *what*). No comment that restates a name or summarizes a body, including doc comments on exported identifiers (Go's doc-comment convention does not apply here), package doc comments and comments on test helpers.
+- **Every package has a package comment** (`// Package x ...`, or `// Command x ...` for a `main`). It is required, not optional: it is the context of the package for whoever opens it. It says what the package is for and, when not obvious, why it exists or where it sits (for a `shared/` package, why it is shared). It goes in the file named after the package (`books.go`, `handler.go`) or, if there is none, in `doc.go`. Checked with `go list` (see `CLAUDE.md`).
+- Every other comment only when the code cannot explain itself: a non-obvious rule, constraint or reason (*why*, not *what*). No comment that restates a name or summarizes a body, including doc comments on exported identifiers (Go's doc-comment convention does not apply to them) and comments on test helpers.
 
 ## Tests
 
