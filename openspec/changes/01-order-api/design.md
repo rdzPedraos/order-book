@@ -62,6 +62,7 @@ docs/api.md
 ### D4. Identidad y aislamiento
 
 - **`shared/identity` es agnóstico del framework:** solo usa la librería estándar (`net/http` y `context`), sin importar Gofr.
+- **`shared/apierror` define el formato de error de `docs/api.md` una sola vez:** `apierror.Error` implementa `StatusCode()` y `Response()`, que Gofr usa para renderizarlo, y `Write(w)` para los middlewares `net/http` como `identity`. Así el error de un handler y el de un middleware salen con el mismo JSON.
   - `identity.Middleware(next http.Handler) http.Handler` lee `X-User-ID`. Si falta, responde `401` con código `missing_user_id` en el formato de error de `docs/api.md`; si está, lo guarda en el `context.Context` del request.
   - `identity.UserID(ctx context.Context) (string, error)` lo recupera, o devuelve `identity.ErrMissingUserID`.
   - Cada servicio lo registra con `app.UseMiddleware(identity.Middleware)` (Gofr acepta middlewares estándar), y el `handler` lo lee con `identity.UserID(ctx)`, porque `*gofr.Context` incluye el `context.Context` del request.
