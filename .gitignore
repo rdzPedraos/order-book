@@ -1,2 +1,4 @@
 node_modules
 .env
+# Go build outputs: go build -o bin/ ./microservices/...
+/bin/

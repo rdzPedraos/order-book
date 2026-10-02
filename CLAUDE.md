@@ -21,6 +21,7 @@ PDRs (Product Development Requests) live in `docs/PDR/`, one file per product. T
 ## Commands
 
 ```bash
+go build -o bin/ ./microservices/...   # build every service into bin/ (ignored by git)
 go test ./microservices/<service>/...   # tests for one service
 go test ./shared/...                    # tests for shared packages
 gofmt -l .                              # unformatted Go files (must be empty)
