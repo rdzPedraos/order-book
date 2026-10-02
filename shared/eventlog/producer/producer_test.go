@@ -205,6 +205,17 @@ func TestMockPublish(t *testing.T) {
 		c.Empty(mock.Messages)
 	})
 
+	t.Run("fails the first calls when asked", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.FailTimes = 1
+		message := newMessage(c, "BRL-VIB")
+
+		c.ErrorIs(Publish(context.Background(), message), ErrNotConnected)
+		c.NoError(Publish(context.Background(), message))
+		c.Equal([]events.Message{message}, mock.Messages)
+	})
+
 	t.Run("unknown book is not published", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
