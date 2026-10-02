@@ -4,9 +4,9 @@
 
 - `gofmt` is mandatory (a hook applies it on every edit).
 - Stdlib and Gofr first. A new dependency is justified as a decision in `design.md`.
-- Errors: wrap with `fmt.Errorf("...: %w", err)`. Domain errors are sentinels in `models`. Only `handler` maps them to a response (HTTP status in the `docs/api.md` format).
+- Errors: wrap with `fmt.Errorf("...: %w", err)`, also to answer with a `fault.Error` caused by another error (`fmt.Errorf("%w: %w", fault.ErrServiceUnavailable, err)`): `fault.From` finds the `fault.Error` in the chain and the client only sees it. A service's domain errors are `fault.Error` values in `models` (status, stable code, message), so the error a client receives is declared next to the rule that produces it. The errors of `shared/` packages are `fault.Error` values too. Codes common to every endpoint (`invalid_body`, `service_unavailable`, `internal_error`) come from `shared/fault`. Every `handler` returns `fault.From(err)`: Gofr only renders a `fault.Error` returned as is, and anything that is not one becomes `internal_error` without revealing its message.
 - Money is always `int64` in the currency's minimal unit via `shared/money`, never `float64`. The number of decimals comes from the per-currency registry in `shared/money`, never from a hardcoded factor like `* 100`. Amounts travel as decimal strings in JSON.
-- No mutable globals and no `panic` in a request path. Configuration is read from env through Gofr's config.
+- No mutable globals and no `panic` in a request path. Fixed lookup tables (the currencies, the books) are package-level `var` maps that no code writes to after initialization, not functions that rebuild them on each call. Configuration is read from env through Gofr's config.
 
 ## Readability
 

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/rdzpedraos/order-book/shared/apierror"
+	"github.com/rdzpedraos/order-book/shared/fault"
 )
 
 // Trusted as is: a future gateway with real authentication will set it.
@@ -22,7 +22,7 @@ var routesWithoutUser = map[string]bool{
 	"/.well-known/health": true,
 }
 
-var ErrMissingUserID = apierror.NewWithStatus(http.StatusUnauthorized, "missing_user_id", "missing X-User-ID header")
+var ErrMissingUserID = fault.NewWithStatus(http.StatusUnauthorized, "missing_user_id", "missing X-User-ID header")
 
 type contextKey struct{}
 

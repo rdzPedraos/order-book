@@ -9,7 +9,11 @@
 // exactly the same way: a price read differently by two services is a money bug.
 package money
 
-import "errors"
+import (
+	"net/http"
+
+	"github.com/rdzpedraos/order-book/shared/fault"
+)
 
 type Currency string
 
@@ -24,13 +28,11 @@ var decimalByCurrency = map[Currency]int{
 }
 
 var (
-	ErrUnknownCurrency = errors.New("unknown currency")
-	ErrInvalidFormat   = errors.New("invalid amount format")
-	ErrTooManyDecimals = errors.New("too many decimals for currency")
-	ErrNegative        = errors.New("negative amount")
-	ErrOutOfRange      = errors.New("amount out of range")
-	ErrOverflow        = errors.New("amount overflow")
-	ErrZeroQuantity    = errors.New("zero quantity")
+	ErrUnknownCurrency = fault.NewWithStatus(http.StatusInternalServerError, "unknown_currency", "unknown currency")
+	ErrInvalidFormat   = fault.New("invalid_amount_format", "invalid amount format")
+	ErrTooManyDecimals = fault.New("too_many_decimals", "too many decimals for currency")
+	ErrNegative        = fault.New("negative_amount", "negative amount")
+	ErrOutOfRange      = fault.New("amount_out_of_range", "amount out of range")
 )
 
 func (c Currency) Decimals() (int, error) {

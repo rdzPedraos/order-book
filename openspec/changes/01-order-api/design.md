@@ -55,14 +55,14 @@ docs/api.md
 `shared/books` define los books válidos, configurados en código. Cada uno tiene su identificador (`BRL-VIB`) y sus monedas base y quote (VIB y BRL).
 
 - **`books.Normalize(input string) (Book, error)`:** pasa a mayúsculas y busca el resultado en el registro, sin reordenar nada: `VIB-BRL` no es `BRL-VIB`. Devuelve el `Book` (identificador canónico, base y quote) o el error sentinela `books.ErrUnknownBook`.
-- **Errores:** `shared/` no conoce HTTP. Solo devuelve errores sentinela (`books.ErrUnknownBook`, y en `money` errores como `money.ErrTooManyDecimals` o `money.ErrUnknownCurrency`), y es el `handler` de cada servicio el que los mapea a la respuesta: `400` con código `unknown_book`, `invalid_quantity`, etc.
+- **Errores:** todos los errores, también los de `shared/` (`books.ErrUnknownBook`, `money.ErrTooManyDecimals`, `money.ErrUnknownCurrency`), son valores `fault.Error` con su status y su código, así cualquier servicio que los responda por HTTP ya sabe cómo. Un consumidor que no es HTTP, como el engine, los usa como cualquier `error`. Los errores de dominio de `models` también son `fault.Error` (`invalid_quantity`, `order_not_found`), y el `handler` devuelve `fault.From(err)`.
 - **Uso:** toda entrada de la API (body, query y path) pasa por `Normalize`, y solo el identificador configurado se guarda, se publica y se devuelve.
 - **Por qué sin reordenar:** el book se identifica por lo que está configurado, no por una regla sobre el nombre. Así no hay dos formas válidas de escribir el mismo book, y la base y la quote salen del registro, no del orden del nombre.
 
 ### D4. Identidad y aislamiento
 
 - **`shared/identity` es agnóstico del framework:** solo usa la librería estándar (`net/http` y `context`), sin importar Gofr.
-- **`shared/apierror` define el formato de error de `docs/api.md` una sola vez:** `apierror.Error` implementa `StatusCode()` y `Response()`, que Gofr usa para renderizarlo, y `Write(w)` para los middlewares `net/http` como `identity`. Así el error de un handler y el de un middleware salen con el mismo JSON.
+- **`shared/fault` define el formato de error de `docs/api.md` una sola vez:** `fault.Error` implementa `StatusCode()` y `Response()`, que Gofr usa para renderizarlo, y `Write(w)` para los middlewares `net/http` como `identity`. Así el error de un handler y el de un middleware salen con el mismo JSON.
   - `identity.Middleware(next http.Handler) http.Handler` lee `X-User-ID`. Si falta, responde `401` con código `missing_user_id` en el formato de error de `docs/api.md`; si está, lo guarda en el `context.Context` del request.
   - `identity.UserID(ctx context.Context) (string, error)` lo recupera, o devuelve `identity.ErrMissingUserID`.
   - Cada servicio lo registra con `app.UseMiddleware(identity.Middleware)` (Gofr acepta middlewares estándar), y el `handler` lo lee con `identity.UserID(ctx)`, porque `*gofr.Context` incluye el `context.Context` del request.
@@ -110,10 +110,10 @@ Cada `POST /orders` crea una orden nueva. Un reintento tras perder la respuesta 
 
 | Capa | Componente | Responsabilidad |
 | --- | --- | --- |
-| `handler` | `create_order.go`, `list_orders.go`, `get_order.go`, `modify_order.go` y `cancel_order.go` (stubs) | Bind del JSON, parseo de dinero con `shared/money` y del book con `books.Normalize`, mapeo de los errores sentinela (de `shared/` y de `models`) a status y código |
+| `handler` | `create_order.go`, `list_orders.go`, `get_order.go`, `modify_order.go` y `cancel_order.go` (stubs) | Bind del JSON, parseo de dinero con `shared/money` y del book con `books.Normalize`, conversión de los errores de parseo de dinero al error del campo (`invalid_limit_price`, `invalid_amount`, `invalid_quantity`), y `fault.From(err)` en cada respuesta de error |
 | `service` | un archivo por caso de uso, como en `handler` | Reglas de la orden: combinaciones válidas de `side`, `limit`, `quantity` y `amount`, y el `type` deducido |
 | `store` | `orders.go` | SQL de `orders`: insert, listado con `cursor`/`limit` y filtros, y lectura propia |
-| `models` | `order.go`, `errors.go` | `Order`, `Status` y los errores de dominio (`ErrOrderNotFound` y los errores de validación) |
+| `models` | `order.go`, `errors.go` | `Order`, `Status` y los errores de dominio como `fault.Error` (`ErrOrderNotFound` y los errores de validación) |
 | `migrations` | `orders` | Tabla e índice de D5 |
 
 - La validación de forma vive en `service`, no en `handler`, para testearla sin HTTP.

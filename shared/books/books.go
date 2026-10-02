@@ -5,13 +5,13 @@
 package books
 
 import (
-	"errors"
 	"strings"
 
+	"github.com/rdzpedraos/order-book/shared/fault"
 	"github.com/rdzpedraos/order-book/shared/money"
 )
 
-var ErrUnknownBook = errors.New("unknown book")
+var ErrUnknownBook = fault.New("unknown_book", "unknown book")
 
 // Book is a tradable pair, as configured. Base is the traded asset and Quote
 // the currency of its price; the ID alone does not say which is which.

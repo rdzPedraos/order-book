@@ -1,34 +1,14 @@
-package apierror
+package fault
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
-
-func TestNew(t *testing.T) {
-	t.Run("defaults to bad request", func(t *testing.T) {
-		c := require.New(t)
-
-		err := New("invalid_quantity", "invalid quantity")
-
-		c.Equal(http.StatusBadRequest, err.Status)
-		c.Equal("invalid_quantity", err.Code)
-		c.Equal("invalid quantity", err.Message)
-	})
-
-	t.Run("with an explicit status", func(t *testing.T) {
-		c := require.New(t)
-
-		err := NewWithStatus(http.StatusNotFound, "order_not_found", "order not found")
-
-		c.Equal(http.StatusNotFound, err.Status)
-		c.Equal("order_not_found", err.Code)
-		c.Equal("order not found", err.Message)
-	})
-}
 
 func TestWrite(t *testing.T) {
 	c := require.New(t)
@@ -60,5 +40,33 @@ func TestGofrRendering(t *testing.T) {
 		c := require.New(t)
 
 		c.Equal("order not found", err.Error())
+	})
+}
+
+func TestFrom(t *testing.T) {
+	notFound := NewWithStatus(http.StatusNotFound, "order_not_found", "order not found")
+
+	t.Run("api error", func(t *testing.T) {
+		c := require.New(t)
+
+		c.Equal(notFound, From(notFound))
+	})
+
+	t.Run("wrapped api error", func(t *testing.T) {
+		c := require.New(t)
+
+		c.Equal(notFound, From(fmt.Errorf("get order: %w", notFound)))
+	})
+
+	t.Run("no error", func(t *testing.T) {
+		c := require.New(t)
+
+		c.NoError(From(nil))
+	})
+
+	t.Run("unknown error hides its message", func(t *testing.T) {
+		c := require.New(t)
+
+		c.Equal(ErrInternal, From(errors.New("dial tcp 10.0.0.5:5432: connection refused")))
 	})
 }
