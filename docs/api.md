@@ -17,8 +17,8 @@ export API=https://<api-host>
 | `POST` | `$API/orders` | [Create an order](#create-an-order) |
 | `GET` | `$API/orders` | [List your orders](#list-your-orders) |
 | `GET` | `$API/orders/{orderId}` | [Get one of your orders](#get-one-of-your-orders) |
-| `PATCH` | `$API/orders/{orderId}` | [Modify an order](#modify-an-order-not-available-yet) (not available yet) |
-| `DELETE` | `$API/orders/{orderId}` | [Cancel an order](#cancel-an-order-not-available-yet) (not available yet) |
+| `POST` | `$API/orders/{orderId}/change` | [Request a change to an order](#request-a-change-to-an-order) |
+| `POST` | `$API/orders/{orderId}/close` | [Request the cancellation of an order](#request-the-cancellation-of-an-order) |
 
 ## Conventions
 
@@ -55,6 +55,10 @@ A price is how much quote one unit of base costs: `"90.00"` in `BRL-VIB` means R
 
 Send the book id exactly as listed above; letter case does not matter (`brl-vib` works). Tickers in another order (`VIB-BRL`) are an unknown book.
 
+### Reads after a write
+
+Creating, changing or cancelling an order is accepted as soon as it is safely recorded, and the orders you read are updated right after, usually within a few milliseconds. In that window a `GET`, `change` or `close` of an order you just created can answer `404 order_not_found`: retry after a moment.
+
 ### Errors
 
 Every error, on every endpoint, has this body:
@@ -68,7 +72,7 @@ Every error, on every endpoint, has this body:
 | Status | Code | When |
 | --- | --- | --- |
 | 401 | `missing_user_id` | `X-User-ID` header missing |
-| 503 | `service_unavailable` | The service is temporarily unavailable; nothing was stored. Retry later |
+| 503 | `service_unavailable` | The service could not record the request in time; retry later. Rarely, the request was recorded but its confirmation was lost: before creating an order again, check [your orders](#list-your-orders) |
 | 500 | `internal_error` | Unexpected error |
 
 ## Orders
@@ -247,18 +251,20 @@ curl $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538 -H 'X-User-ID: user-a'
 | --- | --- | --- |
 | 404 | `order_not_found` | The order does not exist, is someone else's, or the id is malformed |
 
-### Modify an order (not available yet)
+### Request a change to an order
 
-`PATCH $API/orders/{orderId}`
+`POST $API/orders/{orderId}/change`
 
-The contract is final; the operation is not available yet, so a valid request answers `501` and the order does not change.
+Asks to change the `limit` and/or the pending `quantity` of one of your limit orders. The change is applied asynchronously: the response is `201` with the order **as it is now, unchanged**, and the order shows the new values once the change is applied. A change can be rejected if the order was filled first.
 
 **Body:** `limit` and/or `quantity`, validated with the same rules as [Create an order](#create-an-order).
 
 ```bash
-curl -X PATCH $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538 \
+curl -X POST $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538/change \
   -H 'X-User-ID: user-a' -H 'Content-Type: application/json' -d '{"limit":"92.00"}'
 ```
+
+**Response:** `201 Created`, with the [order object](#the-order-object), still with its previous values, in `data`.
 
 **Errors**, checked in this order:
 
@@ -266,24 +272,31 @@ curl -X PATCH $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538 \
 | --- | --- | --- |
 | 400 | `invalid_body` | The body is not valid JSON |
 | 404 | `order_not_found` | The order does not exist, is someone else's, or the id is malformed |
+| 409 | `order_not_modifiable` | The order is a market order; only limit orders can be changed |
 | 400 | `invalid_body` | The body has neither `limit` nor `quantity` |
 | 400 | `invalid_limit_price` | `limit` is ≤ 0 or has too many decimals |
 | 400 | `invalid_quantity` | `quantity` is not an integer or is < 1 |
-| 501 | `not_implemented` | Valid request; modifying is not available yet |
 
-### Cancel an order (not available yet)
+### Request the cancellation of an order
 
-`DELETE $API/orders/{orderId}`
+`POST $API/orders/{orderId}/close`
 
-The contract is final; the operation is not available yet, so your own order answers `501` and stays `PENDING`.
+Asks to cancel one of your orders. The cancellation is applied asynchronously, because it can race with an execution of the same order: the response is `201` with the order **as it is now**, and the order shows the result once it is applied. The result is one of:
+
+- **cancelled**: nothing had been executed;
+- **cancelled in part**: what was already executed stays executed, and the rest is cancelled;
+- **rejected**: the order was already filled, so there is nothing to cancel.
+
+Sending the same request twice is safe: the second one is rejected because the order is already cancelled.
 
 ```bash
-curl -X DELETE $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538 -H 'X-User-ID: user-a'
+curl -X POST $API/orders/01a0fa6b-28ea-7bbb-9edb-4ad34c008538/close -H 'X-User-ID: user-a'
 ```
+
+**Response:** `201 Created`, with the [order object](#the-order-object), still `PENDING`, in `data`.
 
 **Errors**
 
 | Status | Code | When |
 | --- | --- | --- |
 | 404 | `order_not_found` | The order does not exist, is someone else's, or the id is malformed |
-| 501 | `not_implemented` | Your own order; cancelling is not available yet |

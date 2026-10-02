@@ -8,14 +8,14 @@ import (
 )
 
 // Never goes through float64.
-func Parse(c Currency, value *string) (*int64, error) {
+func Parse(currency Currency, value *string) (*int64, error) {
 	if value == nil {
 		return nil, nil
 	}
 
 	input := *value
 
-	decimals, err := c.Decimals()
+	decimals, err := currency.GetDecimals()
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,8 @@ func Parse(c Currency, value *string) (*int64, error) {
 	return &amount, nil
 }
 
-func Format(c Currency, amount int64) (string, error) {
-	decimals, err := c.Decimals()
+func Format(currency Currency, amount int64) (string, error) {
+	decimals, err := currency.GetDecimals()
 	if err != nil {
 		return "", err
 	}
@@ -80,12 +80,12 @@ func splitDecimal(input string) (whole, fraction string, err error) {
 	return whole, fraction, nil
 }
 
-func isDigits(s string) bool {
-	if s == "" {
+func isDigits(value string) bool {
+	if value == "" {
 		return false
 	}
 
-	for _, r := range s {
+	for _, r := range value {
 		if r < '0' || r > '9' {
 			return false
 		}

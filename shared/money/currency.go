@@ -35,7 +35,7 @@ var (
 	ErrOutOfRange      = fault.New("amount_out_of_range", "amount out of range")
 )
 
-func (c Currency) Decimals() (int, error) {
+func (c Currency) GetDecimals() (int, error) {
 	decimals, ok := decimalByCurrency[c]
 	if !ok {
 		return 0, ErrUnknownCurrency

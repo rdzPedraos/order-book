@@ -1,4 +1,4 @@
-package modifyorder
+package changeorder
 
 import (
 	"context"
@@ -18,6 +18,8 @@ import (
 
 	"github.com/rdzpedraos/order-book/microservices/order-service/models"
 	"github.com/rdzpedraos/order-book/microservices/order-service/store/orderdb"
+	"github.com/rdzpedraos/order-book/shared/eventlog/events"
+	"github.com/rdzpedraos/order-book/shared/eventlog/producer"
 	"github.com/rdzpedraos/order-book/shared/identity"
 )
 
@@ -82,131 +84,205 @@ func respond(method string, data any, err error) *httptest.ResponseRecorder {
 	return rec
 }
 
-func modifyOrder(id, body, userID string) *httptest.ResponseRecorder {
-	data, err := Handle(newOrderContext(http.MethodPatch, id, body, userID))
+const limitOrderJSON = `{
+	"orderId": "01923456-7890-7abc-8def-0123456789ab",
+	"book": "BRL-VIB",
+	"side": "BUY",
+	"type": "LIMIT",
+	"limit": "90.00",
+	"amount": null,
+	"quantity": "10",
+	"filledQuantity": "0",
+	"pendingQuantity": "10",
+	"avgPrice": null,
+	"status": "PENDING",
+	"createdAt": "2026-10-01T12:00:00Z",
+	"updatedAt": "2026-10-01T12:00:00Z"
+}`
 
-	return respond(http.MethodPatch, data, err)
+func changeOrder(id, body, userID string) *httptest.ResponseRecorder {
+	data, err := Handle(newOrderContext(http.MethodPost, id, body, userID))
+
+	return respond(http.MethodPost, data, err)
 }
 
 func TestHandle(t *testing.T) {
-	t.Run("valid change not available yet", func(t *testing.T) {
+	t.Run("change of limit requested", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{"limit":"92.00","quantity":"5"}`, userA)
+		rec := changeOrder(orderID.String(), `{"limit":"92.00"}`, userA)
 
-		c.Equal(http.StatusNotImplemented, rec.Code)
-		c.JSONEq(`{"error":{"code":"not_implemented","message":"not implemented yet"}}`, rec.Body.String())
+		c.Len(commandLog.Messages, 1)
+		message := commandLog.Messages[0]
+		c.Equal(events.RouteModifyOrder, message.Route)
+
+		var modifyOrder events.ModifyOrder
+		c.NoError(message.ParsePayload(&modifyOrder))
+		c.Equal(events.ModifyOrder{OrderID: orderID, UserID: userA, Limit: ptr(int64(9200))}, modifyOrder)
+
+		c.Equal(http.StatusCreated, rec.Code)
+		c.JSONEq(`{"data":`+limitOrderJSON+`}`, rec.Body.String())
+		c.Equal(limitOrder(), mock.Orders[0])
 	})
 
-	t.Run("order of another person", func(t *testing.T) {
+	t.Run("market order", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
+		market := limitOrder()
+		market.Type, market.Limit, market.Quantity, market.Amount = models.TypeMarket, nil, nil, ptr(int64(50000))
+		mock.Orders = []models.Order{market}
+
+		rec := changeOrder(orderID.String(), `{"limit":"92.00"}`, userA)
+
+		c.Equal(http.StatusConflict, rec.Code)
+		c.JSONEq(`{"error":{"code":"order_not_modifiable","message":"only limit orders can be modified"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
+	})
+
+	t.Run("log unavailable", func(t *testing.T) {
+		c := require.New(t)
+		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
+		commandLog.Err = errors.New("broker unreachable")
 
-		rec := modifyOrder(orderID.String(), `{"limit":"92.00"}`, userB)
-
-		c.Equal(http.StatusNotFound, rec.Code)
-		c.JSONEq(`{"error":{"code":"order_not_found","message":"order not found"}}`, rec.Body.String())
-	})
-
-	t.Run("malformed id", func(t *testing.T) {
-		c := require.New(t)
-		mock := orderdb.InitMock(t)
-		mock.Orders = []models.Order{limitOrder()}
-
-		rec := modifyOrder("not-a-uuid", `{"limit":"92.00"}`, userA)
-
-		c.Equal(http.StatusNotFound, rec.Code)
-		c.JSONEq(`{"error":{"code":"order_not_found","message":"order not found"}}`, rec.Body.String())
-	})
-
-	t.Run("missing user", func(t *testing.T) {
-		c := require.New(t)
-		mock := orderdb.InitMock(t)
-		mock.Orders = []models.Order{limitOrder()}
-
-		rec := modifyOrder(orderID.String(), `{"limit":"92.00"}`, "")
-
-		c.Equal(http.StatusUnauthorized, rec.Code)
-		c.JSONEq(`{"error":{"code":"missing_user_id","message":"missing X-User-ID header"}}`, rec.Body.String())
-	})
-
-	t.Run("database unavailable", func(t *testing.T) {
-		c := require.New(t)
-		mock := orderdb.InitMock(t)
-		mock.Err = errors.New("connection refused")
-
-		rec := modifyOrder(orderID.String(), `{"limit":"92.00"}`, userA)
+		rec := changeOrder(orderID.String(), `{"limit":"92.00"}`, userA)
 
 		c.Equal(http.StatusServiceUnavailable, rec.Code)
 		c.JSONEq(`{"error":{"code":"service_unavailable","message":"service temporarily unavailable"}}`, rec.Body.String())
 	})
 
+	t.Run("order of another person", func(t *testing.T) {
+		c := require.New(t)
+		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
+		mock.Orders = []models.Order{limitOrder()}
+
+		rec := changeOrder(orderID.String(), `{"limit":"92.00"}`, userB)
+
+		c.Equal(http.StatusNotFound, rec.Code)
+		c.JSONEq(`{"error":{"code":"order_not_found","message":"order not found"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
+	})
+
+	t.Run("malformed id", func(t *testing.T) {
+		c := require.New(t)
+		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
+		mock.Orders = []models.Order{limitOrder()}
+
+		rec := changeOrder("not-a-uuid", `{"limit":"92.00"}`, userA)
+
+		c.Equal(http.StatusNotFound, rec.Code)
+		c.JSONEq(`{"error":{"code":"order_not_found","message":"order not found"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
+	})
+
+	t.Run("missing user", func(t *testing.T) {
+		c := require.New(t)
+		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
+		mock.Orders = []models.Order{limitOrder()}
+
+		rec := changeOrder(orderID.String(), `{"limit":"92.00"}`, "")
+
+		c.Equal(http.StatusUnauthorized, rec.Code)
+		c.JSONEq(`{"error":{"code":"missing_user_id","message":"missing X-User-ID header"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
+	})
+
+	t.Run("database unavailable", func(t *testing.T) {
+		c := require.New(t)
+		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
+		mock.Err = errors.New("connection refused")
+
+		rec := changeOrder(orderID.String(), `{"limit":"92.00"}`, userA)
+
+		c.Equal(http.StatusServiceUnavailable, rec.Code)
+		c.JSONEq(`{"error":{"code":"service_unavailable","message":"service temporarily unavailable"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
+	})
+
 	t.Run("malformed body", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{"limit":`, userA)
+		rec := changeOrder(orderID.String(), `{"limit":`, userA)
 
 		c.Equal(http.StatusBadRequest, rec.Code)
 		c.JSONEq(`{"error":{"code":"invalid_body","message":"request body is not valid JSON"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
 	})
 
 	t.Run("nothing to modify", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{}`, userA)
+		rec := changeOrder(orderID.String(), `{}`, userA)
 
 		c.Equal(http.StatusBadRequest, rec.Code)
 		c.JSONEq(`{"error":{"code":"invalid_body","message":"limit or quantity is required"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
 	})
 
 	t.Run("limit with too many decimals", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{"limit":"92.001"}`, userA)
+		rec := changeOrder(orderID.String(), `{"limit":"92.001"}`, userA)
 
 		c.Equal(http.StatusBadRequest, rec.Code)
 		c.JSONEq(`{"error":{"code":"invalid_limit_price","message":"invalid limit price"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
 	})
 
 	t.Run("fractional quantity", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{"quantity":"2.5"}`, userA)
+		rec := changeOrder(orderID.String(), `{"quantity":"2.5"}`, userA)
 
 		c.Equal(http.StatusBadRequest, rec.Code)
 		c.JSONEq(`{"error":{"code":"invalid_quantity","message":"invalid quantity"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
 	})
 
 	t.Run("zero limit", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{"limit":"0.00"}`, userA)
+		rec := changeOrder(orderID.String(), `{"limit":"0.00"}`, userA)
 
 		c.Equal(http.StatusBadRequest, rec.Code)
 		c.JSONEq(`{"error":{"code":"invalid_limit_price","message":"invalid limit price"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
 	})
 
 	t.Run("zero quantity", func(t *testing.T) {
 		c := require.New(t)
 		mock := orderdb.InitMock(t)
+		commandLog := producer.InitMock(t)
 		mock.Orders = []models.Order{limitOrder()}
 
-		rec := modifyOrder(orderID.String(), `{"quantity":"0"}`, userA)
+		rec := changeOrder(orderID.String(), `{"quantity":"0"}`, userA)
 
 		c.Equal(http.StatusBadRequest, rec.Code)
 		c.JSONEq(`{"error":{"code":"invalid_quantity","message":"invalid quantity"}}`, rec.Body.String())
+		c.Empty(commandLog.Messages)
 	})
 }

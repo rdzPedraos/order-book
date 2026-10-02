@@ -31,7 +31,7 @@ func Handle(ctx *gofr.Context) (any, error) {
 		return nil, err
 	}
 
-	order, err := req.ownedOrder(ctx)
+	order, err := req.getOwnedOrder(ctx)
 	if err != nil {
 		return nil, fault.From(err)
 	}
@@ -63,9 +63,9 @@ func Handle(ctx *gofr.Context) (any, error) {
   ```
 
   Body fields keep the JSON names and raw types of the API (`*string` for amounts and quantities, which travel as decimal strings). Fields that do not come from the body are tagged `json:"-"`. Query parameters and path values are converted to domain types from `models` (`*models.Side`, `*models.Status`) and parsed values (`uuid.UUID`, `*uuid.UUID`, `int`).
-- One function builds it, `parseRequest` (`parseParams` when the input is only the query): `ctx.Bind` for the body, then the user with `identity.UserID`, then the path with `ctx.PathParam` and the query with `ctx.Param` (Gofr cannot bind query parameters). Each field is converted and checked once, with one small `parseX` function per query parameter. Nothing is parsed twice.
+- One function builds it, `parseRequest` (`parseParams` when the input is only the query): `ctx.Bind` for the body, then the user with `identity.GetUserID`, then the path with `ctx.PathParam` and the query with `ctx.Param` (Gofr cannot bind query parameters). Each field is converted and checked once, with one small `parseX` function per query parameter. Nothing is parsed twice.
 - A field that was not sent is a nil pointer; an empty query parameter is not a filter.
-- Anything that needs the request's data is a method on it, so each call site is one line: `req.ownedOrder(ctx)` loads the resource the request points to, `req.validate(book)` checks the rules that need that resource, `req.fetch(ctx)` runs the query.
+- Anything that needs the request's data is a method on it, so each call site is one line: `req.getOwnedOrder(ctx)` loads the resource the request points to, `req.validate(book)` checks the rules that need that resource, `req.listOrders(ctx)` runs the query. Their names follow the verbs of `go.md`.
 - The rules of a domain value are a method of its model, `order.Validate()`, called once the model is built: a valid side, the allowed combinations of fields, values greater than zero. The handler only binds and parses the request (a value that cannot be parsed is answered with the error of its field) and builds the model.
 - Rules that need data from the store (for example, the currencies of the order's book) are checked after loading it, in a `validate` method that receives what it needs.
 

@@ -16,5 +16,47 @@ services:
       start_period: 10s
       interval: 5m
 
+  redpanda:  # the event log; host clients use localhost:19092, containers redpanda:9092
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda start
+      - --mode dev-container
+      - --smp 1
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: [ "CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'" ]
+      start_interval: 1s
+      start_period: 30s
+      interval: 5m
+
+  redpanda-init:  # creates the topics once Redpanda is healthy; infinite retention
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.7
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: [ "/bin/sh", "-c" ]
+    command:
+      - >-
+        rpk topic create orders.commands orders.events
+        --brokers redpanda:9092 --partitions 1 --replicas 1
+        --topic-config retention.ms=-1 --topic-config retention.bytes=-1
+        || rpk topic list --brokers redpanda:9092 | grep -q orders.commands
+
+  redpanda-console:  # web UI for topics, messages and consumer lag: http://localhost:8081
+    image: docker.redpanda.com/redpandadata/console:v2.7.2
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8081:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
 volumes:
   postgres-data:
+  redpanda-data:

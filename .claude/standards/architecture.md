@@ -40,6 +40,7 @@ Rules:
 | Value types whose format must match across services (`money`, `books`) | Domain models (`Order`, `Settlement`, `Level`): each service has its own in `models/` |
 | Message contracts that a producer and its consumers must agree on (`events`) | Business rules, use cases, validations specific to one service |
 | Cross-cutting HTTP conventions every service applies the same way (`identity`, `fault`) | DB access, SQL, migrations |
+| The log: one envelope and the catalog of topics, types and payloads (`eventlog/events`), generic publishing (`eventlog/producer`) and reading (`eventlog/consumer`) | |
 | | DB connections and mocks: Gofr already provides `ctx.SQL` and `container.NewMockContainer` |
 
 ## Service layout

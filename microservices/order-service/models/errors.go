@@ -18,6 +18,7 @@ var (
 )
 
 var (
-	ErrOrderNotFound  = fault.NewWithStatus(http.StatusNotFound, "order_not_found", "order not found")
-	ErrNotImplemented = fault.NewWithStatus(http.StatusNotImplemented, "not_implemented", "not implemented yet")
+	ErrOrderNotFound      = fault.NewWithStatus(http.StatusNotFound, "order_not_found", "order not found")
+	ErrNotImplemented     = fault.NewWithStatus(http.StatusNotImplemented, "not_implemented", "not implemented yet")
+	ErrOrderNotModifiable = fault.NewWithStatus(http.StatusConflict, "order_not_modifiable", "only limit orders can be modified")
 )

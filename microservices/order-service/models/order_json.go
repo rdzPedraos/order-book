@@ -31,32 +31,32 @@ func (o Order) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 
-	limit, err := formatMoney(book.Quote, o.Limit)
+	limit, err := formatOptionalAmount(book.Quote, o.Limit)
 	if err != nil {
 		return nil, err
 	}
 
-	amount, err := formatMoney(book.Quote, o.Amount)
+	amount, err := formatOptionalAmount(book.Quote, o.Amount)
 	if err != nil {
 		return nil, err
 	}
 
-	avgPrice, err := formatMoney(book.Quote, o.AvgPrice)
+	avgPrice, err := formatOptionalAmount(book.Quote, o.AvgPrice)
 	if err != nil {
 		return nil, err
 	}
 
-	quantity, err := formatMoney(book.Base, o.Quantity)
+	quantity, err := formatOptionalAmount(book.Base, o.Quantity)
 	if err != nil {
 		return nil, err
 	}
 
-	filled, err := money.Format(book.Base, o.FilledQuantity)
+	filledQuantity, err := money.Format(book.Base, o.FilledQuantity)
 	if err != nil {
 		return nil, err
 	}
 
-	pending, err := formatMoney(book.Base, o.pendingQuantity())
+	pendingQuantity, err := formatOptionalAmount(book.Base, o.getPendingQuantity())
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +69,8 @@ func (o Order) MarshalJSON() ([]byte, error) {
 		Limit:           limit,
 		Amount:          amount,
 		Quantity:        quantity,
-		FilledQuantity:  filled,
-		PendingQuantity: pending,
+		FilledQuantity:  filledQuantity,
+		PendingQuantity: pendingQuantity,
 		AvgPrice:        avgPrice,
 		Status:          o.Status,
 		CreatedAt:       o.CreatedAt,
@@ -79,7 +79,7 @@ func (o Order) MarshalJSON() ([]byte, error) {
 }
 
 // Nil for a market buy by amount.
-func (o Order) pendingQuantity() *int64 {
+func (o Order) getPendingQuantity() *int64 {
 	if o.Quantity == nil {
 		return nil
 	}
@@ -89,12 +89,12 @@ func (o Order) pendingQuantity() *int64 {
 	return &pending
 }
 
-func formatMoney(c money.Currency, amount *int64) (*string, error) {
+func formatOptionalAmount(currency money.Currency, amount *int64) (*string, error) {
 	if amount == nil {
 		return nil, nil
 	}
 
-	formatted, err := money.Format(c, *amount)
+	formatted, err := money.Format(currency, *amount)
 	if err != nil {
 		return nil, err
 	}

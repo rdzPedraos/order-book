@@ -9,7 +9,7 @@ import (
 )
 
 func TestNormalize(t *testing.T) {
-	want := Book{ID: "BRL-VIB", Base: money.VIB, Quote: money.BRL}
+	want := Book{ID: "BRL-VIB", Base: money.VIB, Quote: money.BRL, Partition: 0}
 
 	t.Run("configured id", func(t *testing.T) {
 		c := require.New(t)
@@ -39,5 +39,20 @@ func TestNormalize(t *testing.T) {
 
 		_, err := Normalize("BTC-USD")
 		c.ErrorIs(err, ErrUnknownBook)
+	})
+}
+
+func TestPartition(t *testing.T) {
+	t.Run("same book, same partition", func(t *testing.T) {
+		c := require.New(t)
+
+		first, err := Normalize("BRL-VIB")
+		c.NoError(err)
+
+		second, err := Normalize("brl-vib")
+		c.NoError(err)
+
+		c.Equal(int32(0), first.Partition)
+		c.Equal(first.Partition, second.Partition)
 	})
 }

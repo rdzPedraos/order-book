@@ -25,6 +25,7 @@ type postgres struct{}
 
 var db orderDB = postgres{}
 
+// An order that is already stored is left as it is, so a repeated NewOrder has no effect.
 func InsertOrder(ctx *gofr.Context, order models.Order) error {
 	return db.insertOrder(ctx, order)
 }

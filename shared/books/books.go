@@ -19,15 +19,15 @@ type Book struct {
 	ID    string
 	Base  money.Currency
 	Quote money.Currency
+
+	// Every command of the book goes to this partition of the log, so whoever
+	// reads a book knows which partition to open.
+	Partition int32
 }
 
 // Tickers are never reordered: "VIB-BRL" is unknown.
-func Normalize(input string) (Book, error) {
-	return lookup(strings.ToUpper(input))
-}
-
-func lookup(id string) (Book, error) {
-	book, ok := registry[id]
+func Normalize(id string) (Book, error) {
+	book, ok := registry[strings.ToUpper(id)]
 	if !ok {
 		return Book{}, ErrUnknownBook
 	}

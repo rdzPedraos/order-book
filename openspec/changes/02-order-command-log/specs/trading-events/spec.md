@@ -25,9 +25,9 @@ Los comandos `NewOrder`, `ModifyOrder` y `CancelOrder` MUST publicarse en un log
 - **WHEN** OrderService cae después de enviar un comando y antes de recibir la confirmación del log
 - **THEN** el cliente no recibe una respuesta de éxito, y la orden existe solo si su comando quedó en el log
 
-### Requirement: Envelope de comando
-Todo comando MUST llevar `commandId` único, `type`, `book`, `userId`, `orderId`, versión de esquema, el timestamp en que OrderService lo aceptó y su payload. Un mismo comando publicado más de una vez MUST conservar el mismo `commandId`.
+### Requirement: Envelope de mensaje
+Todo mensaje del log MUST llevar `id` único, su ruta `<topic>.<tipo>`, `book`, versión de esquema, el timestamp en que se creó y su payload; el payload de un comando de órdenes MUST llevar `orderId` y `userId`. Un mismo mensaje publicado más de una vez MUST conservar el mismo `id`.
 
 #### Scenario: Reintento del producer
 - **WHEN** el producer reenvía un comando porque no recibió la confirmación del log
-- **THEN** el comando queda una sola vez en el log, con su `commandId` original
+- **THEN** el comando queda una sola vez en el log, con su `id` original

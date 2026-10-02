@@ -1,0 +1,29 @@
+# Event log
+
+Services talk through the log (Redpanda, Kafka API) with `shared/eventlog`: the contract in `events`, publishing in `producer`, reading in `consumer`. A service never calls Kafka directly.
+
+## Messages
+
+- Every message is an `events.Message`: `id` (UUIDv7), `route`, `book`, `schemaVersion`, `createdAt` and a `payload`. Build it with `events.NewMessage(route, book, createdAt, payload)`; a handler reads the payload with `message.ParsePayload(&payload)`.
+- A message is named only by its **route**, `<topic>.<type>` (`orders.commands.NewOrder`): it is published to the topic and a handler subscribes to the route. The catalog of `events` declares one `Route…` constant per type and one payload struct per type, in a file per topic family (`orders.go`). Adding a message is adding both there.
+- Payloads carry the ids they need (`orderId`, `userId`). Amounts and quantities are `*int64` in minimal units, tagged `json:",string"`, so they travel as decimal strings.
+- Changes to a payload are backward compatible (add, don't break), like the rest of `shared/`.
+
+## Publishing
+
+`producer.Publish(ctx, message)` returns only once every in-sync replica has the message (`acks=all`), and gives up after 5 seconds. It goes to the topic of its route, in the partition of its `book` (from `shared/books`), keyed by the book id, so a book's messages are read in one total order. A handler answers a publish error as `fault.ErrServiceUnavailable` (`503`).
+
+`producer.Connect` runs once in `main`; handler tests replace the log with `producer.InitMock(t)` and check `mock.Messages`.
+
+## Consuming
+
+```go
+consumer.Start(ctx, brokers, group, ctx.Logger,
+	consumer.Subscribe(events.RouteNewOrder, insertneworder.Handle),
+)
+```
+
+- One `Start` per service role, in `app.OnStart`, with one `Subscribe` per route, like HTTP routes. Each route has its own handler package (`handlers/insert-new-order`) with `func Handle(ctx *gofr.Context, message events.Message) error`.
+- Delivery is at least once: a message is committed only after its handler returns `nil`, and an error retries the same message, so return an error only when retrying can succeed (a store failure). A payload that can never be applied is logged and skipped (`return nil`).
+- Handlers are idempotent, because a message can arrive twice: write with `ON CONFLICT … DO NOTHING` or check the message `id`.
+- A route nobody subscribed to is committed without being handled. There is no order across topics: a handler that needs something another topic creates returns an error until it exists.

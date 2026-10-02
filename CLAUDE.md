@@ -18,6 +18,7 @@ PDRs (Product Development Requests) live in `docs/PDR/`, one file per product. T
 @.claude/standards/architecture.md
 @.claude/standards/go.md
 @.claude/standards/handlers.md
+@.claude/standards/eventlog.md
 
 ## Commands
 

@@ -39,7 +39,7 @@ func Handle(ctx *gofr.Context) (any, error) {
 		return nil, err
 	}
 
-	page, err := req.fetch(ctx)
+	page, err := req.listOrders(ctx)
 	if err != nil {
 		return nil, fault.From(err)
 	}
@@ -49,7 +49,7 @@ func Handle(ctx *gofr.Context) (any, error) {
 
 // An empty parameter is not a filter.
 func parseParams(ctx *gofr.Context) (*request, error) {
-	userID, err := identity.UserID(ctx)
+	userID, err := identity.GetUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func parseParams(ctx *gofr.Context) (*request, error) {
 }
 
 // One extra row tells whether there is a next page without a count query.
-func (r *request) fetch(ctx *gofr.Context) (*response.Response, error) {
+func (r *request) listOrders(ctx *gofr.Context) (*response.Response, error) {
 	orders, err := orderdb.ListOrders(ctx, orderdb.ListQuery{
 		UserID: r.UserID,
 		Status: r.Status,

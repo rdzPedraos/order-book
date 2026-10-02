@@ -26,8 +26,8 @@ const (
 	StatusPending Status = "PENDING"
 )
 
-func IsValidStatus(s Status) bool {
-	return s == StatusPending
+func IsValidStatus(status Status) bool {
+	return status == StatusPending
 }
 
 // Limit and Amount are in the book's quote currency, Quantity and
@@ -48,8 +48,8 @@ type Order struct {
 	UpdatedAt      time.Time
 }
 
-func IsValidSide(s Side) bool {
-	return s == SideBuy || s == SideSell
+func IsValidSide(side Side) bool {
+	return side == SideBuy || side == SideSell
 }
 
 func (o Order) Validate() error {
@@ -57,7 +57,7 @@ func (o Order) Validate() error {
 		return ErrInvalidSide
 	}
 
-	if !o.isSupported() {
+	if !o.isSupportedCombination() {
 		return ErrUnsupportedOrder
 	}
 
@@ -66,7 +66,7 @@ func (o Order) Validate() error {
 
 // The allowed combinations of docs/api.md: a market buy is by amount; a limit
 // order and a market sell are by quantity.
-func (o Order) isSupported() bool {
+func (o Order) isSupportedCombination() bool {
 	if o.Type == TypeMarket && o.Side == SideBuy {
 		return o.Amount != nil && o.Quantity == nil
 	}

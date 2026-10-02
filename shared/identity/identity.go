@@ -46,7 +46,7 @@ func Middleware(next http.Handler) http.Handler {
 	})
 }
 
-func UserID(ctx context.Context) (string, error) {
+func GetUserID(ctx context.Context) (string, error) {
 	userID, ok := ctx.Value(contextKey{}).(string)
 	if !ok || userID == "" {
 		return "", ErrMissingUserID

@@ -1,5 +1,5 @@
 // Package createorder handles POST /orders: it parses the body, applies the
-// order rules and stores the order as PENDING.
+// order rules and publishes the order as a NewOrder command to the log.
 package createorder
 
 import (
@@ -10,8 +10,9 @@ import (
 	"gofr.dev/pkg/gofr"
 
 	"github.com/rdzpedraos/order-book/microservices/order-service/models"
-	"github.com/rdzpedraos/order-book/microservices/order-service/store/orderdb"
 	"github.com/rdzpedraos/order-book/shared/books"
+	"github.com/rdzpedraos/order-book/shared/eventlog/events"
+	"github.com/rdzpedraos/order-book/shared/eventlog/producer"
 	"github.com/rdzpedraos/order-book/shared/fault"
 	"github.com/rdzpedraos/order-book/shared/identity"
 	"github.com/rdzpedraos/order-book/shared/money"
@@ -26,7 +27,7 @@ type createOrderRequest struct {
 }
 
 func Handle(ctx *gofr.Context) (any, error) {
-	userID, err := identity.UserID(ctx)
+	userID, err := identity.GetUserID(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -36,19 +37,42 @@ func Handle(ctx *gofr.Context) (any, error) {
 		return nil, fault.ErrInvalidBody
 	}
 
-	order, err := newOrder(userID, &req)
+	order, err := buildOrder(userID, &req)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := orderdb.InsertOrder(ctx, order); err != nil {
-		return nil, fault.From(fmt.Errorf("%w: %w", fault.ErrServiceUnavailable, err))
+	if err := publishNewOrder(ctx, order); err != nil {
+		return nil, fault.From(err)
 	}
 
 	return order, nil
 }
 
-func newOrder(userID string, req *createOrderRequest) (models.Order, error) {
+// The order exists once its NewOrder is in the log; the insert-new-order
+// subscriber stores it in orders afterwards.
+func publishNewOrder(ctx *gofr.Context, order models.Order) error {
+	message, err := events.NewMessage(events.RouteNewOrder, order.Book, order.CreatedAt, events.NewOrder{
+		OrderID:  order.ID,
+		UserID:   order.UserID,
+		Side:     string(order.Side),
+		Type:     string(order.Type),
+		Limit:    order.Limit,
+		Amount:   order.Amount,
+		Quantity: order.Quantity,
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := producer.Publish(ctx, message); err != nil {
+		return fmt.Errorf("%w: %w", fault.ErrServiceUnavailable, err)
+	}
+
+	return nil
+}
+
+func buildOrder(userID string, req *createOrderRequest) (models.Order, error) {
 	book, err := books.Normalize(req.Book)
 	if err != nil {
 		return models.Order{}, err
@@ -69,25 +93,25 @@ func newOrder(userID string, req *createOrderRequest) (models.Order, error) {
 		return models.Order{}, models.ErrInvalidQuantity
 	}
 
-	id, err := uuid.NewV7()
+	orderID, err := uuid.NewV7()
 	if err != nil {
 		return models.Order{}, fmt.Errorf("generate order id: %w", err)
 	}
 
-	now := time.Now().UTC()
+	createdAt := time.Now().UTC()
 
 	order := models.Order{
-		ID:        id,
+		ID:        orderID,
 		UserID:    userID,
 		Book:      book.ID,
 		Side:      req.Side,
-		Type:      orderType(req),
+		Type:      getOrderType(req),
 		Limit:     limit,
 		Amount:    amount,
 		Quantity:  quantity,
 		Status:    models.StatusPending,
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt: createdAt,
+		UpdatedAt: createdAt,
 	}
 
 	if err := order.Validate(); err != nil {
@@ -97,7 +121,7 @@ func newOrder(userID string, req *createOrderRequest) (models.Order, error) {
 	return order, nil
 }
 
-func orderType(req *createOrderRequest) models.OrderType {
+func getOrderType(req *createOrderRequest) models.OrderType {
 	if req.Limit != nil {
 		return models.TypeLimit
 	}

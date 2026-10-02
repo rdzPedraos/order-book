@@ -16,7 +16,32 @@ Code is optimized to be easy to read, not short or clever.
 - **Files of at most 300 lines** (`_test.go` files don't count). When a file grows, split it by responsibility: one file per responsibility (`handler.go`, `validate.go`), not one file with everything.
 - A function does one thing, and its name says what.
 - Early returns instead of chained `else`.
-- Explicit names (`reservedAmount`, not `ra`).
+- **Names are the documentation.** Whoever reads a call site understands what happens without opening the function, so a name says the action and the thing it acts on. When a name needs a comment to be understood, rename it instead.
+
+### Naming
+
+Functions and methods are `verbObject`: a verb from this table, then what it acts on.
+
+| Verb | Meaning | Examples |
+| --- | --- | --- |
+| `get` | Reads one value that already exists: from the store, a registry, the context | `orderdb.GetOrder`, `identity.GetUserID`, `req.getOwnedOrder` |
+| `normalize` | Turns user input into the canonical registered value, or fails | `books.Normalize` (`"brl-vib"` → the `BRL-VIB` book) |
+| `list` | Reads several values | `orderdb.ListOrders`, `req.listOrders` |
+| `insert`, `update`, `delete` | Writes to a database | `orderdb.InsertOrder`, `insertNewOrder` |
+| `publish` | Sends a message to the log or a broker | `publishModifyOrder`, `publishCancelOrder` |
+| `parse` | Turns raw input (a string, a body) into a typed value, or fails | `parseRequest`, `parseCursor`, `parsePositiveAmount` |
+| `validate` | Checks a rule and returns an error; returns nothing else | `order.Validate`, `validateAmounts` |
+| `build` | Makes a value in memory from other values, without I/O | `buildOrder`, `buildModifyOrder` |
+| `set` | Stores a value somewhere that keeps it (a gauge, a field) | `setProjectionLag` |
+| `format` | Turns a typed value into its text form | `money.Format`, `formatOptionalAmount` |
+| `is`, `has` | Answers a yes/no question | `isSupportedCombination`, `isInQuery`, `isValidSide` |
+| `start`, `serve`, `run` | Begins work that keeps running in the background | `consumer.Start`, `serveAPI`, `runProjector` |
+
+- The object is never left out: `publishCancelOrder`, not `publish`; `getOwnedOrder`, not `ownedOrder`; `buildModifyOrder`, not `change`.
+- No generic verbs that hide what happens: `handle`, `process`, `do`, `exec`, `manage`, `fetch`, `record`. `Handle` is the one exception, because it is the entry point every handler package exposes to Gofr.
+- `New` only for a constructor of the package's type (`fault.New`, `events.NewCommand`).
+- Variables say what they hold, not their type: `reservedAmount`, not `ra`; `modifyOrder`, not `change` or `payload`; `encodedCommand`, not `value` or `body`; `createdAt`, not `now`. One letter only for a method receiver (`o Order`) and a loop index; parameters are named in full (`query ListQuery`, not `q`; `currency money.Currency`, not `c`).
+- A function that returns a bool reads as a question: `isValidSide(side)`, `isDigits(value)`.
 - **Every package has a package comment** (`// Package x ...`, or `// Command x ...` for a `main`). It is required, not optional: it is the context of the package for whoever opens it. It says what the package is for and, when not obvious, why it exists or where it sits (for a `shared/` package, why it is shared). It goes in the file named after the package (`books.go`, `handler.go`) or, if there is none, in `doc.go`. Checked with `go list` (see `CLAUDE.md`).
 - Every other comment only when the code cannot explain itself: a non-obvious rule, constraint or reason (*why*, not *what*). No comment that restates a name or summarizes a body, including doc comments on exported identifiers (Go's doc-comment convention does not apply to them) and comments on test helpers.
 

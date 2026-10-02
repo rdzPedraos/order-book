@@ -21,7 +21,8 @@ WHERE id = $1 AND user_id = $2`
 
 const insertOrder = `
 INSERT INTO orders (` + orderColumns + `)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (id) DO NOTHING`
 
 // A NULL parameter disables its filter. The id is a UUIDv7, so ORDER BY id
 // is creation order and the orders_by_user (user_id, id DESC) index serves it.
@@ -36,10 +37,10 @@ WHERE user_id = $1
 ORDER BY id DESC
 LIMIT $6`
 
-func (postgres) insertOrder(ctx *gofr.Context, o models.Order) error {
+func (postgres) insertOrder(ctx *gofr.Context, order models.Order) error {
 	_, err := ctx.SQL.ExecContext(ctx, insertOrder,
-		o.ID, o.UserID, o.Book, o.Side, o.Type, o.Limit, o.Amount, o.Quantity,
-		o.FilledQuantity, o.AvgPrice, o.Status, o.CreatedAt, o.UpdatedAt)
+		order.ID, order.UserID, order.Book, order.Side, order.Type, order.Limit, order.Amount, order.Quantity,
+		order.FilledQuantity, order.AvgPrice, order.Status, order.CreatedAt, order.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert order: %w", err)
 	}
@@ -47,14 +48,14 @@ func (postgres) insertOrder(ctx *gofr.Context, o models.Order) error {
 	return nil
 }
 
-func (postgres) listOrders(ctx *gofr.Context, q ListQuery) ([]models.Order, error) {
-	rows, err := ctx.SQL.QueryContext(ctx, listOrders, q.UserID, q.Status, q.Side, q.Book, q.Cursor, q.Limit)
+func (postgres) listOrders(ctx *gofr.Context, query ListQuery) ([]models.Order, error) {
+	rows, err := ctx.SQL.QueryContext(ctx, listOrders, query.UserID, query.Status, query.Side, query.Book, query.Cursor, query.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("list orders: %w", err)
 	}
 	defer rows.Close()
 
-	orders := make([]models.Order, 0, q.Limit)
+	orders := make([]models.Order, 0, query.Limit)
 
 	for rows.Next() {
 		order, err := scanOrder(rows)
@@ -98,18 +99,18 @@ func scanOrder(row interface{ Scan(dest ...any) error }) (models.Order, error) {
 		return models.Order{}, fmt.Errorf("scan order: %w", err)
 	}
 
-	order.Limit = optional(limit)
-	order.Amount = optional(amount)
-	order.Quantity = optional(quantity)
-	order.AvgPrice = optional(avgPrice)
+	order.Limit = parseNullInt64(limit)
+	order.Amount = parseNullInt64(amount)
+	order.Quantity = parseNullInt64(quantity)
+	order.AvgPrice = parseNullInt64(avgPrice)
 
 	return order, nil
 }
 
-func optional(v sql.NullInt64) *int64 {
-	if !v.Valid {
+func parseNullInt64(value sql.NullInt64) *int64 {
+	if !value.Valid {
 		return nil
 	}
 
-	return &v.Int64
+	return &value.Int64
 }

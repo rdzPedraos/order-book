@@ -20,6 +20,15 @@ func ptr[T any](value T) *T {
 }
 
 func TestMockInsertOrder(t *testing.T) {
+	t.Run("order inserted twice is recorded once", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+
+		c.NoError(InsertOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)))
+		c.NoError(InsertOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)))
+		c.Equal([]models.Order{order(1, "user-a", models.SideBuy)}, mock.Orders)
+	})
+
 	t.Run("order is recorded", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)

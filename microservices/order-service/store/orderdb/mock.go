@@ -32,6 +32,12 @@ func (m *Mock) insertOrder(_ *gofr.Context, order models.Order) error {
 		return m.Err
 	}
 
+	for _, stored := range m.Orders {
+		if stored.ID == order.ID {
+			return nil
+		}
+	}
+
 	m.Orders = append(m.Orders, order)
 
 	return nil
@@ -51,7 +57,7 @@ func (m *Mock) getOrder(_ *gofr.Context, userID string, id uuid.UUID) (models.Or
 	return models.Order{}, models.ErrOrderNotFound
 }
 
-func (m *Mock) listOrders(_ *gofr.Context, q ListQuery) ([]models.Order, error) {
+func (m *Mock) listOrders(_ *gofr.Context, query ListQuery) ([]models.Order, error) {
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -59,20 +65,20 @@ func (m *Mock) listOrders(_ *gofr.Context, q ListQuery) ([]models.Order, error) 
 	var found []models.Order
 
 	for _, order := range m.Orders {
-		if matches(order, q) {
+		if isInQuery(order, query) {
 			found = append(found, order)
 		}
 	}
 
 	slices.SortFunc(found, func(a, b models.Order) int { return bytes.Compare(b.ID[:], a.ID[:]) })
 
-	return found[:min(len(found), q.Limit)], nil
+	return found[:min(len(found), query.Limit)], nil
 }
 
-func matches(o models.Order, q ListQuery) bool {
-	return o.UserID == q.UserID &&
-		(q.Status == nil || o.Status == *q.Status) &&
-		(q.Side == nil || o.Side == *q.Side) &&
-		(q.Book == nil || o.Book == *q.Book) &&
-		(q.Cursor == nil || bytes.Compare(o.ID[:], q.Cursor[:]) < 0)
+func isInQuery(order models.Order, query ListQuery) bool {
+	return order.UserID == query.UserID &&
+		(query.Status == nil || order.Status == *query.Status) &&
+		(query.Side == nil || order.Side == *query.Side) &&
+		(query.Book == nil || order.Book == *query.Book) &&
+		(query.Cursor == nil || bytes.Compare(order.ID[:], query.Cursor[:]) < 0)
 }

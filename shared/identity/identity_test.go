@@ -40,7 +40,7 @@ func TestMiddleware(t *testing.T) {
 		reachedNext, _ := serveMiddleware("/orders", "user-a")
 		c.NotNil(reachedNext)
 
-		userID, err := UserID(reachedNext.Context())
+		userID, err := GetUserID(reachedNext.Context())
 		c.NoError(err)
 		c.Equal("user-a", userID)
 	})
@@ -51,7 +51,7 @@ func TestMiddleware(t *testing.T) {
 		reachedNext, _ := serveMiddleware("/orders", "  user-a  ")
 		c.NotNil(reachedNext)
 
-		userID, err := UserID(reachedNext.Context())
+		userID, err := GetUserID(reachedNext.Context())
 		c.NoError(err)
 		c.Equal("user-a", userID)
 	})
@@ -93,7 +93,7 @@ func TestUserID(t *testing.T) {
 	t.Run("user id stored by the middleware", func(t *testing.T) {
 		c := require.New(t)
 
-		got, err := UserID(context.WithValue(context.Background(), contextKey{}, "user-a"))
+		got, err := GetUserID(context.WithValue(context.Background(), contextKey{}, "user-a"))
 		c.NoError(err)
 		c.Equal("user-a", got)
 	})
@@ -101,21 +101,21 @@ func TestUserID(t *testing.T) {
 	t.Run("context without user id", func(t *testing.T) {
 		c := require.New(t)
 
-		_, err := UserID(context.Background())
+		_, err := GetUserID(context.Background())
 		c.ErrorIs(err, ErrMissingUserID)
 	})
 
 	t.Run("empty user id", func(t *testing.T) {
 		c := require.New(t)
 
-		_, err := UserID(context.WithValue(context.Background(), contextKey{}, ""))
+		_, err := GetUserID(context.WithValue(context.Background(), contextKey{}, ""))
 		c.ErrorIs(err, ErrMissingUserID)
 	})
 
 	t.Run("value that is not a string", func(t *testing.T) {
 		c := require.New(t)
 
-		_, err := UserID(context.WithValue(context.Background(), contextKey{}, 42))
+		_, err := GetUserID(context.WithValue(context.Background(), contextKey{}, 42))
 		c.ErrorIs(err, ErrMissingUserID)
 	})
 }

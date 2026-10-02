@@ -113,3 +113,18 @@ func TestGetOrderIntegration(t *testing.T) {
 		c.ErrorIs(err, models.ErrOrderNotFound)
 	})
 }
+
+func TestInsertOrderTwiceIntegration(t *testing.T) {
+	c := require.New(t)
+	ctx := newIntegrationContext(t)
+	userID := "twice-" + uuid.NewString()
+	id := insertOrders(t, ctx, userID, models.SideBuy, 1)[0]
+
+	order, err := GetOrder(ctx, userID, id)
+	c.NoError(err)
+	c.NoError(InsertOrder(ctx, order))
+
+	orders, err := ListOrders(ctx, ListQuery{UserID: userID, Limit: 10})
+	c.NoError(err)
+	c.Len(orders, 1)
+}

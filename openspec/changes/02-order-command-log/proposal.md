@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Fase 2 de 8. Introducir los comandos de órdenes (`NewOrder`, `ModifyOrder` y `CancelOrder`) y publicarlos en Redpanda (API de Kafka), en el topic `orders.commands` particionado por book. El log es el registro principal: `POST`, `PATCH` y `DELETE /orders` publican su comando directamente, y un consumidor de OrderService guarda la orden en la tabla `orders` apenas su `NewOrder` está en el log. Esta fase también agrega modificar y cancelar como solicitudes asíncronas (`202`): OrderService registra la intención y no decide el resultado.
+Fase 2 de 8. Introducir los comandos de órdenes (`NewOrder`, `ModifyOrder` y `CancelOrder`) y publicarlos en Redpanda (API de Kafka), en el topic `orders.commands` particionado por book. El log es el registro principal: crear, modificar y cancelar publican su comando directamente, y un consumidor de OrderService guarda la orden en la tabla `orders` apenas su `NewOrder` está en el log. Modificar y cancelar pasan a ser asíncronos (`POST /orders/{id}/change` y `POST /orders/{id}/close`): OrderService publica la intención y la orden cambia después, cuando se proyectan los eventos del engine.
 
 ## Why
 
@@ -17,13 +17,13 @@ El engine procesará cada book con un single writer: un único proceso aplica lo
 
 ## What Changes
 
-- **Comandos:** tipos de comando y su envelope en `shared/events`, y los topics con la partición de cada book en `shared/topics`.
+- **Comandos:** los nombres de los topics, los tipos de comando, sus payloads y el envelope común `Message` en `shared/eventlog`, y la partición de cada book en el registro de `shared/books`.
 - **Publicación directa:** `POST /orders` publica `NewOrder` con `acks=all` y responde `201` con la orden en `PENDING`; si el log no confirma, responde `503` y no queda nada.
 - **Consumidor:** un subscriber de OrderService lee `orders.commands` y guarda cada `NewOrder` en `orders` de forma idempotente. La lectura es eventualmente consistente: un `GET` inmediato puede no ver todavía la orden.
-- **Solicitudes:** `PATCH /orders/{id}` y `DELETE /orders/{id}` dejan de ser stubs (`501`). Publican `ModifyOrder` / `CancelOrder`, responden `202` con el `orderId` y el `commandId`, y no cambian la orden. Repetir una cancelación publica otro `CancelOrder`; el engine rechaza los que llegan sobre una orden ya final.
+- **Modificar y cancelar:** los stubs `PATCH` y `DELETE /orders/{id}` (`501`) se reemplazan por `POST /orders/{id}/change` y `POST /orders/{id}/close`. Cada uno publica su `ModifyOrder` / `CancelOrder`, responde `201` con la orden sin cambios; la fase 5 la actualiza con los eventos del engine. Repetir una cancelación publica otro `CancelOrder`, que el engine rechaza si la orden ya es final.
 - **Infra:** Redpanda en `deploy/docker-compose.yml`, con un job de init que crea `orders.commands` y `orders.events` con retención infinita, y Redpanda Console para ver en desarrollo los topics, los mensajes y el lag de los consumidores.
-- **Producer:** `acks=all`, idempotent producer y reintentos del cliente, con un partitioner manual que toma la partición de `shared/topics`.
-- **Métricas y docs:** métrica `order_projection_lag_seconds` (cuánto tarda una orden aceptada en aparecer en `orders`) y documentación del topic en `docs/internal.md`.
+- **Producer:** `acks=all`, idempotent producer y reintentos del cliente, con un partitioner manual que toma la partición del book.
+- **Métricas y docs:** métrica `order_projection_lag_seconds` (cuánto tarda una orden aceptada en aparecer en `orders`) y las reglas del log en `.claude/standards/eventlog.md`.
 
 ## Capabilities
 
@@ -33,7 +33,7 @@ El engine procesará cada book con un single writer: un único proceso aplica lo
 
 ### Modified Capabilities
 
-- `order-management`: se agregan el comando de creación y las solicitudes asíncronas de modificación y cancelación.
+- `order-management`: se agregan el comando de creación y la modificación y cancelación asíncronas.
 
 ## Assumptions
 
@@ -51,7 +51,7 @@ El engine procesará cada book con un single writer: un único proceso aplica lo
 
 ## Impact
 
-- **Código:** `microservices/order-service` (publicación en los handlers, consumidor de `orders.commands`, `PATCH`/`DELETE`), `shared/events`, `shared/topics`.
+- **Código:** `microservices/order-service` (publicación en los handlers, consumidor de `orders.commands`, rutas `change`/`close`), `shared/eventlog` y `shared/books`.
 - **Infra:** Redpanda y Redpanda Console en compose.
-- **Docs:** `docs/api.md` (semántica de `202`, resultados posibles de una cancelación y lectura eventual) y `docs/internal.md` (nuevo: topic `orders.commands`).
+- **Docs:** `docs/api.md` (modificación y cancelación asíncronas, sus resultados posibles y la lectura eventual) y `.claude/standards/eventlog.md` (nuevo: cómo publicar y consumir el log).
 - **Dependencias:** `franz-go` (cliente Kafka con partitioner manual y batching).
