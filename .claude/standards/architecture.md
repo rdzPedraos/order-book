@@ -29,7 +29,7 @@ Rules:
 - No service business logic and no access to a service's database.
 - Never imports anything from `microservices/`.
 - Framework-agnostic: never imports Gofr or any other framework. Only the standard library (`net/http`, `context`, `errors`, ...) and, if justified, small stable libraries. HTTP helpers are plain `func(http.Handler) http.Handler` middlewares that services register with `app.UseMiddleware`.
-- Returns sentinel errors, never HTTP responses (except a middleware such as `identity`, which follows the error format in `docs/api.md`). Each service's `handler` maps them to status and code.
+- Returns sentinel errors, never HTTP responses. Each service's `handler` maps them to status and code with `shared/apierror`, which also writes the error of a middleware such as `identity`, so every error follows the format in `docs/api.md`.
 - Changes are backward compatible (add, don't break). A breaking change requires an OpenSpec change.
 - When in doubt, the code goes in the service. Promote it to `shared/` when a second service needs it.
 
@@ -39,7 +39,7 @@ Rules:
 | --- | --- |
 | Value types whose format must match across services (`money`, `books`) | Domain models (`Order`, `Settlement`, `Level`): each service has its own in `models/` |
 | Message contracts that a producer and its consumers must agree on (`events`) | Business rules, use cases, validations specific to one service |
-| Cross-cutting HTTP conventions every service applies the same way (`identity`) | DB access, SQL, migrations |
+| Cross-cutting HTTP conventions every service applies the same way (`identity`, `apierror`) | DB access, SQL, migrations |
 | | DB connections and mocks: Gofr already provides `ctx.SQL` and `container.NewMockContainer` |
 
 ## Service layout
