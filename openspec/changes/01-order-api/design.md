@@ -17,7 +17,7 @@ El repositorio es greenfield: solo existen el PRD ([docs/PDR/order-book-vibraniu
 
 ```text
 go.mod / go.sum      módulo único github.com/rdzpedraos/order-book
-shared/        money, books, identity
+shared/        money, books, identity, fault
 microservices/
   order-service/
 deploy/docker-compose.yml
@@ -26,11 +26,11 @@ docs/api.md
 
 - **Por qué:** los tipos compartidos (dinero, books) deben ser idénticos en todos los servicios.
 - **Por qué en `shared/`:** los tres paquetes son contratos entre servicios, no código de dominio. `money` y `books` fijan formatos que tienen que coincidir en todos los servicios (un precio o un book interpretado distinto es un bug de dinero), e `identity` es la convención HTTP común. Una vez definidos casi no cambian.
-- **Qué no va en `shared/`:** los modelos de dominio (cada servicio tiene los suyos en su `models/`), las reglas de negocio, el SQL y las migraciones, y la conexión o los mocks de base (Gofr ya da `ctx.SQL` y `container.NewMockContainer`).
+- **Qué no va en `shared/`:** los modelos de dominio (cada servicio tiene los suyos en su `models/`), las reglas de negocio, el SQL y las migraciones, y la conexión a la base (Gofr ya da `ctx.SQL`).
 - **Un solo `go.mod` en la raíz:** todos los paquetes se importan por su path completo desde el módulo (`github.com/rdzpedraos/order-book/shared/money`). `go build ./...` y `go test ./...` corren desde la raíz, y cada servicio se compila solo con `go build ./microservices/<x>`.
 - **Aislamiento:** un servicio no importa paquetes de otro. Es una regla de estructura; el compilador no la impone porque comparten módulo.
 - **Alternativa descartada:** un `go.mod` por servicio (con `go.work` o con `replace`). Da caché de Docker más fina y versiones por servicio, pero multiplica los `go.mod`/`go.sum` sin necesidad para un equipo único.
-- Cada servicio sigue el layout de capas de `.claude/standards/architecture.md` (`handler → service → store`).
+- Cada servicio sigue el layout de `.claude/standards/architecture.md`: un paquete por entrada en `handlers/<ruta>/` que llama al `store`, sin una capa de reglas aparte (ver D9).
 - **Alternativa descartada:** repos separados con dependencias versionadas. Agrega fricción sin beneficio para un equipo único.
 
 ### D2. Dinero como `int64` en unidades mínimas, con escala por moneda
@@ -40,11 +40,11 @@ docs/api.md
   | Moneda | Decimales | Unidad mínima | Ejemplo |
   | --- | --- | --- | --- |
   | BRL | 2 | centavo | `"90.00"` → `9000` |
-  | VIB | 0 | 1 VIB | `10` → `10` |
+  | VIB | 0 | 1 VIB | `"10"` → `10` |
 
   Agregar una moneda (por ejemplo COP con 0 o 2 decimales) es una entrada en ese registro, sin cambiar la lógica.
 - **Precio:** se expresa en unidades mínimas de la moneda quote por 1 unidad de la base. En `BRL-VIB`, `9000` = R$ 90,00 por 1 VIB.
-- **API:** los montos y las cantidades viajan como strings decimales (`"90.00"`, `"10"`), también en el request. `money.Parse(currency, s)` valida contra la escala de la moneda: rechaza más decimales que los permitidos, negativos y valores fuera de rango, y `money.Format(currency, v)` arma el texto. Se usan strings porque un número JSON se lee como `float64` en muchos clientes (por ejemplo, JavaScript).
+- **API:** los montos y las cantidades viajan como strings decimales (`"90.00"`, `"10"`), también en el request. `money.Parse(currency, value *string) (*int64, error)` valida contra la escala de la moneda (un campo que no se envió llega `nil` y vuelve `nil`): rechaza más decimales que los permitidos, negativos y valores fuera de rango, y `money.Format(currency, v)` arma el texto. Se usan strings porque un número JSON se lee como `float64` en muchos clientes (por ejemplo, JavaScript).
 - **Moneda desconocida:** `Parse` y `Format` obtienen la escala con `currency.Decimals()`, que devuelve `money.ErrUnknownCurrency` si la moneda no está en el registro. Ninguna conversión usa una escala por defecto.
 - **Aritmética:** esta fase solo parsea y formatea montos; no multiplica ni divide. La aritmética entre monedas (el monto de una cantidad a un precio, la cantidad que alcanza un monto, el precio promedio) llega con quien la usa, en las fases 3 y 4, y recibe la moneda base para reescalar con sus decimales en vez de suponer que es entera.
 - **Base de datos:** columnas `BIGINT`, con la moneda implícita en la columna (`limit_price` y `amount` en la quote, `quantity` en la base).
@@ -83,7 +83,7 @@ Columnas:
 Índice `orders_by_user (user_id, id DESC)` para el listado.
 
 - **Orden por `id`:** el `id` es un UUIDv7, que lleva el timestamp de creación en sus primeros bits. Ordenar por `id` es ordenar por momento de creación, y como es único no hace falta otra columna para desempatar.
-- **Paginación por `cursor` + `limit`, no por `OFFSET`:** `GET /orders?cursor=<orderId>&limit=20` devuelve las órdenes que siguen a esa en el listado, sin incluirla (`WHERE user_id = ? AND id < ? ORDER BY id DESC LIMIT ?`). Sin `cursor`, arranca desde la más reciente. `limit` va de 1 a 100 (20 por defecto). La respuesta es `{"data": [...], "metadata": {"nextCursor": "<orderId>"}}` (el formato de `response.Response` de Gofr). `nextCursor` es el `orderId` de la última orden de la página, o `null` si no hay más; el cliente lo reenvía como `cursor`. Para saber si hay más, el `store` pide `limit + 1` filas y descarta la extra.
+- **Paginación por `cursor` + `limit`, no por `OFFSET`:** `GET /orders?cursor=<orderId>&limit=20` devuelve las órdenes que siguen a esa en el listado, sin incluirla (`WHERE user_id = ? AND id < ? ORDER BY id DESC LIMIT ?`). Sin `cursor`, arranca desde la más reciente. `limit` va de 1 a 100 (20 por defecto). La respuesta es `{"data": [...], "metadata": {"nextCursor": "<orderId>"}}` (el formato de `response.Response` de Gofr). `nextCursor` es el `orderId` de la última orden de la página, o `null` si no hay más; el cliente lo reenvía como `cursor`. Para saber si hay más, el handler pide al `store` `limit + 1` filas y descarta la extra.
   - **Por qué no `OFFSET`:** para llegar a la página N, `OFFSET` lee y descarta todas las filas anteriores. Además, si entra una orden nueva mientras se pagina, las páginas se corren y una orden se repite o se saltea. Con `cursor`, cualquier página cuesta lo mismo y las órdenes nuevas no desplazan nada.
   - **Parámetros explícitos:** El `cursor` es un `orderId` visible, no un token, y se combina libremente con los filtros `status`, `side` y `book`. El cliente puede pedir "desde esta orden" con cualquier filtro, sin depender de un token armado por el servidor.
   - **Nombre:** `cursor` y no `before` (confunde en un listado de más reciente a más vieja) ni `from` (sugiere que incluye la orden indicada).
@@ -101,28 +101,28 @@ Cada `POST /orders` crea una orden nueva. Un reintento tras perder la respuesta 
 ### D8. Acceso a Postgres con Gofr
 
 - **Conexión y pool:** los arma Gofr desde la configuración (`DB_*` en el entorno) y los expone como `ctx.SQL`.
-- **Consultas:** el `store` las escribe a mano como SQL con `ctx.SQL` (`ExecContext`, `QueryContext`, o `Select` para llenar structs).
+- **Consultas:** `store/orderdb` las escribe a mano como SQL con `ctx.SQL` (`ExecContext`, `QueryContext`, `QueryRowContext`) y las expone como funciones del paquete (`orderdb.InsertOrder`, `orderdb.ListOrders`, `orderdb.GetOrder`). Los handlers las llaman directamente, sin interfaces ni constructores.
 - **Migraciones:** son funciones Go registradas con `app.Migrate(migrations.All())`, versionadas por número, y Gofr las aplica al arrancar.
-- **Tests:** el `service` se testea con su interface `Store` mockeada. El `store` se testea con `container.NewMockContainer`, que da un mock SQL, y las consultas críticas (listado con `cursor`, índices) se verifican además contra un PostgreSQL real.
+- **Tests:** `orderdb` guarda la base en una variable del paquete, y `orderdb.InitMock(t)` la reemplaza durante un test por una base en memoria: registra lo escrito (`mock.Orders`), se puede sembrar con órdenes existentes y hace fallar todas las llamadas con `mock.Err`. Los tests de cada handler usan ese mock. El SQL de `orderdb` se prueba contra PostgreSQL con la etiqueta `integration` (insert, listado con filtros y `cursor`, lectura propia y ajena), y la cobertura se mide con esos tests.
+- **Alternativa descartada para los tests:** mocks de SQL (`container.NewMockContainer` con sqlmock). Comparan el texto de la consulta, así que se rompen cuando se reescribe sin cambiar lo que hace, y no detectan un SQL que no funciona contra PostgreSQL.
 - **Alternativas descartadas:** sqlc (genera código tipado desde archivos `.sql`, pero suma una herramienta y un paso de generación), un ORM (oculta el SQL justo donde importan los locks y los índices) y un repositorio genérico en `shared/` (las consultas son propias de cada servicio y no entran en un CRUD genérico).
 
-### D9. Capas de OrderService
+### D9. Estructura de OrderService
 
-| Capa | Componente | Responsabilidad |
+| Paquete | Contenido | Responsabilidad |
 | --- | --- | --- |
-| `handler` | `create_order.go`, `list_orders.go`, `get_order.go`, `modify_order.go` y `cancel_order.go` (stubs) | Bind del JSON, parseo de dinero con `shared/money` y del book con `books.Normalize`, conversión de los errores de parseo de dinero al error del campo (`invalid_limit_price`, `invalid_amount`, `invalid_quantity`), y `fault.From(err)` en cada respuesta de error |
-| `service` | un archivo por caso de uso, como en `handler` | Reglas de la orden: combinaciones válidas de `side`, `limit`, `quantity` y `amount`, y el `type` deducido |
-| `store` | `orders.go` | SQL de `orders`: insert, listado con `cursor`/`limit` y filtros, y lectura propia |
-| `models` | `order.go`, `errors.go` | `Order`, `Status` y los errores de dominio como `fault.Error` (`ErrOrderNotFound` y los errores de validación) |
+| `handlers/create-order`, `list-orders`, `get-order`, `modify-order`, `cancel-order` | `handler.go` + `handler_test.go` | Cada uno arma su `request` con lo que recibe (body, ruta, query y usuario), lo convierte una sola vez (dinero con `shared/money`, book con `books.Normalize`; un valor que no se puede convertir responde el error de su campo), llama a `orderdb` y responde. `create-order` arma el `models.Order` y llama a `order.Validate()`; `modify-order` y `cancel-order` validan identidad, propiedad y body y responden `501` (D7) |
+| `models` | `order.go`, `order_json.go`, `errors.go` | `Order` y sus tipos; `Order.Validate()` con las reglas de la orden (`side` válido, combinaciones permitidas de `limit`, `quantity` y `amount` → `unsupported_order`, valores mayores que cero); el JSON de la API (`MarshalJSON`, montos y cantidades como strings decimales); los errores de dominio como `fault.Error` |
+| `store/orderdb` | `main.go`, `postgres.go`, `mock.go` | Las funciones públicas y `ListQuery` (los filtros del listado), el SQL de `orders` contra PostgreSQL y el mock en memoria de D8 |
 | `migrations` | `orders` | Tabla e índice de D5 |
 
-- La validación de forma vive en `service`, no en `handler`, para testearla sin HTTP.
-- `service` define la interface `Store` y `handler` la interface `Service`; cada capa se testea con la de abajo mockeada.
+- **Sin capa de reglas aparte:** las reglas de cada caso de uso viven en su handler, junto a la entrada que validan, y las reglas de la orden en `models.Order`. La forma de escribir un handler está en `.claude/standards/handlers.md`.
+- **Errores:** los de varios handlers o del store en `models`; los de un solo handler, como `invalid_cursor`, en su `handler.go`; un error de base de datos se envuelve como `fault.ErrServiceUnavailable` y el handler responde `fault.From(err)`.
 
 ### D10. Aserciones de tests con testify
 
-- **Decisión:** los tests usan `github.com/stretchr/testify/assert` (`assert.Equal`, `assert.NoError`, `assert.ErrorIs`) en lugar de `if` con `t.Error`.
-- **Por qué:** cada comprobación queda en una línea y, si falla, testify imprime el valor esperado y el obtenido sin escribir un mensaje a mano.
+- **Decisión:** los tests usan `github.com/stretchr/testify/require` mediante `c := require.New(t)` al inicio de cada `t.Run` (`c.Equal`, `c.NoError`, `c.ErrorIs`, `c.JSONEq`), en lugar de `if` con `t.Error`.
+- **Por qué:** cada comprobación queda en una línea y, si falla, testify imprime el valor esperado y el obtenido; `require` corta el caso en el primer fallo, en vez de seguir con datos inválidos como hace `testify/assert`.
 - **Costo:** ya está en `go.mod` como dependencia indirecta de Gofr; pasa a ser directa, sin sumar un módulo nuevo.
 - **Alternativa descartada:** solo la librería estándar (`if` + `t.Errorf`), que obliga a formatear cada mensaje de fallo.
 
