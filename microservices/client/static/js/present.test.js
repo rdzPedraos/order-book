@@ -1,20 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { describeMovement, getAvailableFunds, getBalanceRows, getLevelRows } from './present.js';
+import { describeMovement, getAvailableFunds, getBalanceRows, getLevelRows, getSpread } from './present.js';
 
 const formatTime = (createdAt) => `at ${createdAt}`;
 
-test('Book con niveles: each row has price, volume and bar', () => {
+test('Book con niveles: each row has price, volume, running total and bar', () => {
   const rows = getLevelRows([
     { price: '100.00', volume: '30', orders: 2 },
     { price: '99.00', volume: '15', orders: 1 },
   ]);
 
   assert.deepEqual(rows, [
-    { price: 'R$ 100.00', volume: '30', barPercent: 100 },
-    { price: 'R$ 99.00', volume: '15', barPercent: 50 },
+    { price: '100.00', volume: '30', total: '30', barPercent: 66 },
+    { price: '99.00', volume: '15', total: '45', barPercent: 100 },
   ]);
+});
+
+test('Book con niveles: prices get thousands separators', () => {
+  const rows = getLevelRows([{ price: '1500.50', volume: '1200', orders: 3 }]);
+
+  assert.deepEqual(rows, [{ price: '1,500.50', volume: '1,200', total: '1,200', barPercent: 100 }]);
 });
 
 test('Un lado vacío: no levels give no rows', () => {
@@ -104,4 +110,39 @@ test('getAvailableFunds reads what each currency has available', () => {
 
 test('getAvailableFunds is zero before the wallet is read', () => {
   assert.deepEqual(getAvailableFunds(null), { BRL: '0', VIB: '0' });
+});
+
+test('Spread entre ambos lados: best ask minus best bid', () => {
+  const book = { bids: [{ price: '99.81', volume: '3' }], asks: [{ price: '100.02', volume: '4' }] };
+
+  assert.equal(getSpread(book), 'R$ 0.21');
+});
+
+test('Spread entre ambos lados: empty without a side', () => {
+  assert.equal(getSpread({ bids: [], asks: [{ price: '100.02', volume: '4' }] }), '');
+  assert.equal(getSpread(null), '');
+});
+
+test('Un lado vacío: getLevelRows fills the rows that are missing so the list keeps its size', () => {
+  const rows = getLevelRows([{ price: '100.00', volume: '30', orders: 2 }], 3);
+
+  assert.deepEqual(rows, [
+    { price: '100.00', volume: '30', total: '30', barPercent: 100 },
+    { price: '', volume: '', total: '', barPercent: 0 },
+    { price: '', volume: '', total: '', barPercent: 0 },
+  ]);
+});
+
+test('Un lado vacío: a side with no levels gives only empty rows', () => {
+  assert.equal(getLevelRows([], 2).length, 2);
+});
+
+test('getLevelRows keeps only the levels that fit in the list', () => {
+  const levels = [
+    { price: '100.00', volume: '1', orders: 1 },
+    { price: '99.00', volume: '2', orders: 1 },
+    { price: '98.00', volume: '3', orders: 1 },
+  ];
+
+  assert.equal(getLevelRows(levels, 2).length, 2);
 });

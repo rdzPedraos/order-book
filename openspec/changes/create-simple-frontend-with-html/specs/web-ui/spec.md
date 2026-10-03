@@ -30,22 +30,30 @@ La página MUST pedir un nombre ficticio y enviarlo como `X-User-ID` en cada lla
 - **THEN** la página conserva el último nombre válido
 
 ### Requirement: Mercado a la vista
-La página MUST mostrar la profundidad del book `BRL-VIB` de `GET /market/orderbook/BRL-VIB`: las compras (`bids`) y las ventas (`asks`) con su precio en BRL y su volumen en VIB, el mejor precio de cada lado primero. MUST mostrarse sin que la persona haya elegido un nombre.
+La página MUST mostrar la profundidad del book `BRL-VIB` de `GET /market/orderbook/BRL-VIB`: en una sola lista: las ventas (`asks`) arriba y las compras (`bids`) abajo, con el spread en medio. Cada nivel muestra su precio en BRL, su volumen en VIB y el volumen acumulado desde el mejor precio, y el mejor precio de cada lado queda junto al spread: la compra más alta y la venta más baja. Cada lado MUST tener siempre el mismo número de filas, con las que faltan vacías, y MUST actualizarse sin recrearse. MUST mostrarse sin que la persona haya elegido un nombre.
 
 #### Scenario: Book con niveles
 - **WHEN** el mercado responde `bids = [{price:"100.00", volume:"30"}, {price:"99.00", volume:"15"}]` y `asks = [{price:"101.00", volume:"5"}]`
 - **THEN** la página muestra las compras de R$ 100.00 con 30 VIB y de R$ 99.00 con 15 VIB, y la venta de R$ 101.00 con 5 VIB
 
+#### Scenario: Volumen acumulado
+- **WHEN** el mercado responde `bids = [{price:"100.00", volume:"30"}, {price:"99.00", volume:"15"}]`
+- **THEN** la página muestra 30 VIB acumulados en R$ 100.00 y 45 VIB acumulados en R$ 99.00, con la barra del nivel proporcional al acumulado
+
+#### Scenario: Spread entre ambos lados
+- **WHEN** la mejor compra es R$ 99.81 y la mejor venta es R$ 100.02
+- **THEN** la página muestra un spread de R$ 0.21 entre las ventas y las compras
+
 #### Scenario: Un lado vacío
 - **WHEN** el mercado responde `asks = []`
-- **THEN** la página muestra el lado de ventas vacío y sigue mostrando las compras
+- **THEN** la página muestra el lado de ventas con todas sus filas vacías, sigue mostrando las compras y la lista no cambia de altura
 
 #### Scenario: Sin nombre elegido
 - **WHEN** la persona todavía no eligió un nombre
 - **THEN** la página muestra igualmente el mercado
 
 ### Requirement: Refresco periódico
-Mientras la página está abierta, MUST volver a consultar la profundidad del mercado, el wallet y los movimientos cada 2 segundos y repintar todo con las respuestas. MUST hacer la misma consulta justo después de una escritura exitosa, sin esperar al siguiente ciclo.
+Mientras la página está abierta, MUST volver a consultar la profundidad del mercado, el wallet, los movimientos y las órdenes cada 2 segundos y repintar todo con las respuestas. MUST hacer la misma consulta justo después de una escritura exitosa, sin esperar al siguiente ciclo.
 
 #### Scenario: Cambio en el mercado
 - **WHEN** el book cambia y pasan 2 segundos
@@ -53,7 +61,7 @@ Mientras la página está abierta, MUST volver a consultar la profundidad del me
 
 #### Scenario: Después de operar
 - **WHEN** la persona envía una orden o carga dinero y la API responde `201`
-- **THEN** la página vuelve a consultar el mercado, el wallet y los movimientos de inmediato
+- **THEN** la página vuelve a consultar el mercado, el wallet, los movimientos y las órdenes de inmediato
 
 #### Scenario: Falla una consulta
 - **WHEN** una consulta del ciclo falla o no responde
@@ -104,6 +112,67 @@ La página MUST NOT enviar una orden o un depósito cuyo valor no sea un número
 #### Scenario: Error de la API
 - **WHEN** la API responde `400` con `error.message = "invalid quantity"` o `503` con `service_unavailable`
 - **THEN** la página muestra el mensaje del error y no da la orden por enviada
+
+### Requirement: Mis órdenes
+La página MUST listar las órdenes de la persona (de `GET /orders`, la más reciente primero) con su lado, su descripción, su estado, lo ejecutado y la hora. MUST ofrecer el filtro Activas | Todas, con Activas por defecto; activas son las órdenes `PENDING`, `OPEN` y `PARTIALLY_FILLED`.
+
+#### Scenario: Solo las activas
+- **WHEN** la persona tiene una orden `OPEN`, una `FILLED` y una `CANCELLED` y el filtro es Activas
+- **THEN** la lista muestra solo la orden `OPEN`
+
+#### Scenario: Ver todas
+- **WHEN** la persona cambia el filtro a Todas
+- **THEN** la lista muestra las tres órdenes, la más reciente primero
+
+#### Scenario: Sin órdenes
+- **WHEN** la persona no tiene órdenes, o todavía no eligió un nombre
+- **THEN** la lista aparece vacía y dice que no hay órdenes
+
+### Requirement: Lo ejecutado de cada orden
+Cada orden MUST mostrar cuánto se ejecutó (`filledQuantity`) y a qué precio promedio (`avgPrice`). Si tiene `quantity`, MUST mostrarlo contra el total de la orden. Cuando la orden está `CANCELLED` o `REJECTED`, MUST mostrar la razón: la de `reason` cuando viene, y «cancelada por ti» cuando una cancelada no trae razón.
+
+#### Scenario: Orden con ejecución parcial
+- **WHEN** una orden `PARTIALLY_FILLED` de `quantity = "10"` tiene `filledQuantity = "4"` y `avgPrice = "90.50"`
+- **THEN** la página muestra que se ejecutaron 4 de 10 VIB a un promedio de R$ 90.50
+
+#### Scenario: Orden sin ejecución
+- **WHEN** una orden `OPEN` tiene `filledQuantity = "0"` y `avgPrice = null`
+- **THEN** la página muestra que todavía no se ejecutó nada
+
+#### Scenario: Compra a mercado
+- **WHEN** una compra a mercado tiene `quantity = null` y `filledQuantity = "3"`
+- **THEN** la página muestra que se ejecutaron 3 VIB, sin un total
+
+#### Scenario: Cancelada sin liquidez
+- **WHEN** una orden `CANCELLED` trae `reason = "no_liquidity"`
+- **THEN** la página muestra que se canceló por falta de liquidez en el mercado
+
+#### Scenario: Cancelada por la persona
+- **WHEN** una orden `CANCELLED` no trae `reason`
+- **THEN** la página muestra que fue cancelada por la persona
+
+#### Scenario: Orden rechazada
+- **WHEN** una orden `REJECTED` trae `reason = "insufficient_funds"`
+- **THEN** la página muestra que se rechazó por fondos insuficientes
+
+### Requirement: Cancelar una orden
+La página MUST mostrar un botón Cancelar en cada orden activa y MUST NOT mostrarlo en las que ya son finales. Al confirmarlo MUST enviar `POST /orders/{orderId}/close`, y la orden MUST mostrar su resultado en el siguiente refresco, porque la cancelación se aplica de forma asíncrona.
+
+#### Scenario: Cancelar una orden abierta
+- **WHEN** la persona pulsa Cancelar en una orden `OPEN`
+- **THEN** envía `POST /orders/{orderId}/close` con su `X-User-ID`, dice que pidió la cancelación y vuelve a consultar de inmediato
+
+#### Scenario: Cancelación aplicada
+- **WHEN** la cancelación ya se aplicó y llega el siguiente refresco
+- **THEN** la orden pasa a `CANCELLED`, el botón Cancelar desaparece y el filtro Activas ya no la muestra
+
+#### Scenario: Orden final
+- **WHEN** una orden está `FILLED`, `CANCELLED` o `REJECTED`
+- **THEN** la página no muestra el botón Cancelar en esa orden
+
+#### Scenario: Error al cancelar
+- **WHEN** la API responde un error al cancelar
+- **THEN** la página muestra el mensaje del error
 
 ### Requirement: Cuenta y movimientos
 La página MUST mostrar los saldos de BRL y VIB de la persona (total y reservado, de `GET /wallet`) y sus 5 movimientos más recientes (de `GET /wallet/movements`), el más nuevo primero, con tipo, moneda, monto con signo y hora. MUST reconocer los tipos `DEPOSIT`, `WITHDRAWAL`, `RESERVE`, `RELEASE`, `TRADE_PAID` y `TRADE_RECEIVED`.

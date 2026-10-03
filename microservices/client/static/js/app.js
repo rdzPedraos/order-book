@@ -4,11 +4,13 @@
 import * as api from './api.js';
 import { buildDepositBody, validateDeposit } from './deposit.js';
 import { loadName, saveName, chooseName } from './name.js';
+import { describeOrder, filterOrders } from './orders.js';
 import { buildOrderBody, describeUnits, getReserve, getVisibleFields, validateOrder } from './order.js';
-import { describeMovement, getAvailableFunds, getBalanceRows, getLevelRows } from './present.js';
+import { describeMovement, getAvailableFunds, getBalanceRows, getLevelRows, getSpread } from './present.js';
 import { applyReadings } from './readings.js';
 
 const POLLING_MS = 2000;
+const BOOK_SIZE = 6;
 
 const HINTS = {
   BUY_LIMIT: 'Compra VIB pagando como máximo el precio que elijas.',
@@ -19,7 +21,8 @@ const HINTS = {
 
 const DEPOSIT_DEFAULTS = { BRL: '150.00', VIB: '10' };
 
-const state = { name: '', book: null, wallet: null, movements: null, busy: false };
+const state = { name: '', book: null, wallet: null, movements: null, orders: null, busy: false };
+let paintedOrders = '';
 
 const byId = (id) => document.getElementById(id);
 const getChecked = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
@@ -39,16 +42,34 @@ function showMessage(id, text, tone) {
   box.hidden = text === '';
 }
 
-function paintLevels(containerId, levels, kind) {
-  const rows = getLevelRows(levels ?? []).map((row) => {
+function createLevels(containerId, kind) {
+  const rows = Array.from({ length: BOOK_SIZE }, () => {
     const level = makeElement('div', `level level-${kind}`);
-    const bar = makeElement('span', 'level-bar');
-    bar.style.width = `${row.barPercent}%`;
-    level.append(bar, makeElement('strong', '', row.price), makeElement('span', '', row.volume));
+    level.append(makeElement('span', 'level-bar'), makeElement('strong'), makeElement('span'), makeElement('span'));
 
     return level;
   });
   byId(containerId).replaceChildren(...rows);
+}
+
+function setText(element, text) {
+  if (element.textContent !== text) element.textContent = text;
+}
+
+// The rows are made once and only their text and bar change, so the list
+// does not blink or move when the book does. Sells are painted with the best
+// price at the bottom, next to the spread.
+function paintLevels(containerId, levels, kind) {
+  const ordered = getLevelRows(levels ?? [], BOOK_SIZE);
+  if (kind === 'ask') ordered.reverse();
+
+  ordered.forEach((row, index) => {
+    const [bar, price, volume, total] = byId(containerId).children[index].children;
+    bar.style.width = `${row.barPercent}%`;
+    setText(price, row.price);
+    setText(volume, row.volume);
+    setText(total, row.total);
+  });
 }
 
 function paintBalances() {
@@ -73,6 +94,42 @@ function paintMovements() {
   byId('movements').replaceChildren(...rows);
 }
 
+// The list is rebuilt only when what it shows changed, so a click on Cancelar
+// is not lost to a repaint that swaps the button under the cursor.
+function paintOrders() {
+  const shown = filterOrders(state.orders, getChecked('orders-filter')).map((order) => describeOrder(order));
+  const signature = JSON.stringify(shown);
+  byId('orders-empty').hidden = shown.length > 0;
+  if (signature === paintedOrders) return;
+  paintedOrders = signature;
+
+  const rows = shown.map((order) => {
+    const row = makeElement('div', 'order');
+    row.dataset.buy = String(order.isBuy);
+    row.dataset.status = order.status;
+    const text = makeElement('span', 'order-text');
+    text.append(
+      makeElement('strong', 'order-title', `${order.title} · ${order.shortId}`),
+      makeElement('span', 'order-sub', `${order.progress} · ${order.time}`),
+    );
+    if (order.reason) text.append(makeElement('span', 'order-reason', order.reason));
+    const action = makeElement('span', 'order-action');
+    if (order.canCancel) action.append(makeCancelButton(order.orderId));
+    row.append(makeElement('span', 'order-side', order.sideLabel), text, makeElement('span', 'order-status', order.statusLabel), action);
+
+    return row;
+  });
+  byId('orders').replaceChildren(...rows);
+}
+
+function makeCancelButton(orderId) {
+  const button = makeElement('button', 'order-cancel', 'Cancelar');
+  button.type = 'button';
+  button.addEventListener('click', () => cancelOrder(orderId));
+
+  return button;
+}
+
 function paintUser() {
   byId('user-name').textContent = state.name || 'sin nombre';
   byId('user-initial').textContent = state.name ? state.name.charAt(0).toUpperCase() : '?';
@@ -82,8 +139,10 @@ function paintUser() {
 function paintData() {
   paintLevels('asks', state.book?.asks, 'ask');
   paintLevels('bids', state.book?.bids, 'bid');
+  byId('spread').textContent = getSpread(state.book) || '—';
   paintBalances();
   paintMovements();
+  paintOrders();
 }
 
 function paintCase() {
@@ -105,10 +164,11 @@ async function refresh() {
   if (state.busy) return;
   state.busy = true;
 
-  const asked = { book: api.getMarket() };
+  const asked = { book: api.getMarket(BOOK_SIZE) };
   if (state.name) {
     asked.wallet = api.getWallet(state.name);
     asked.movements = api.getMovements(state.name);
+    asked.orders = api.getOrders(state.name);
   }
   const results = await Promise.allSettled(Object.values(asked));
   const readings = Object.fromEntries(Object.keys(asked).map((name, index) => [name, results[index]]));
@@ -120,7 +180,7 @@ async function refresh() {
 function changeName(draft) {
   const name = chooseName(draft, state.name);
   if (name !== state.name) {
-    Object.assign(state, { name, wallet: null, movements: null });
+    Object.assign(state, { name, wallet: null, movements: null, orders: null });
     saveName(localStorage, name);
     paintData();
     refresh();
@@ -144,6 +204,16 @@ async function sendOrder() {
   }
   const reserve = getReserve(side, type, values);
   showMessage('order-message', `Orden enviada. Reservamos ${describeUnits(reserve.currency, reserve.units)}.`, 'ok');
+  refresh();
+}
+
+async function cancelOrder(orderId) {
+  try {
+    await api.closeOrder(state.name, orderId);
+  } catch (error) {
+    return showMessage('orders-message', error.message, 'error');
+  }
+  showMessage('orders-message', 'Pediste cancelar la orden. Se aplica en un momento.', 'ok');
   refresh();
 }
 
@@ -171,6 +241,9 @@ function listen() {
   for (const radio of document.querySelectorAll('input[name="side"], input[name="type"]')) {
     radio.addEventListener('change', paintCase);
   }
+  for (const radio of document.querySelectorAll('input[name="orders-filter"]')) {
+    radio.addEventListener('change', paintOrders);
+  }
   for (const radio of document.querySelectorAll('input[name="deposit-currency"]')) {
     radio.addEventListener('change', () => {
       byId('deposit-amount').value = DEPOSIT_DEFAULTS[radio.value];
@@ -180,6 +253,8 @@ function listen() {
 }
 
 state.name = loadName(localStorage);
+createLevels('asks', 'ask');
+createLevels('bids', 'bid');
 listen();
 paintUser();
 paintCase();

@@ -64,18 +64,12 @@
     <button class="confirm" id="confirm" type="button">Confirmar compra</button>
     <div class="message" id="order-message" role="status" hidden></div>
 
-    <div class="depth">
+    <div class="book">
       <h3>Volumen en el mercado</h3>
-      <div class="depth-columns">
-        <div>
-          <div class="depth-head depth-head-sell"><span>Ventas · precio</span><span>VIB</span></div>
-          <div id="asks"></div>
-        </div>
-        <div>
-          <div class="depth-head depth-head-buy"><span>Compras · precio</span><span>VIB</span></div>
-          <div id="bids"></div>
-        </div>
-      </div>
+      <div class="book-head"><span>Precio (BRL)</span><span>VIB</span><span>Acumulado</span></div>
+      <div id="asks"></div>
+      <div class="book-spread">Spread <strong id="spread">—</strong></div>
+      <div id="bids"></div>
     </div>
   </section>
 
@@ -115,6 +109,20 @@
       <h3>Movimientos</h3>
       <div id="movements"></div>
     </div>
+  </section>
+
+  <section class="card card-wide" aria-labelledby="orders-title">
+    <div class="card-head">
+      <h2 id="orders-title">Mis órdenes</h2>
+      <fieldset class="tabs tabs-type">
+        <legend class="sr-only">Qué órdenes ver</legend>
+        <label class="tab"><input type="radio" name="orders-filter" value="ACTIVE" checked><span>Activas</span></label>
+        <label class="tab"><input type="radio" name="orders-filter" value="ALL"><span>Todas</span></label>
+      </fieldset>
+    </div>
+    <div id="orders"></div>
+    <p class="empty" id="orders-empty">No hay órdenes para mostrar.</p>
+    <div class="message" id="orders-message" role="status" hidden></div>
   </section>
 
 </main>

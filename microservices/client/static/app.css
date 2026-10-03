@@ -119,23 +119,24 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .message { padding: 12px 14px; border-radius: 12px; font-size: 14px; font-weight: 600; background: var(--buy-soft); color: var(--buy-ink); }
 .message[data-tone="error"] { background: var(--sell-soft); color: var(--sell-ink); }
 
-/* Market depth */
-.depth { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
-.depth h3 { margin: 0; }
-.depth-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 16px; }
-.depth-head { display: flex; justify-content: space-between; padding: 0 10px 4px; font-size: 12px; font-weight: 700; }
-.depth-head-sell { color: var(--buy-ink); }
-.depth-head-buy { color: var(--sell-ink); }
-.level {
-  position: relative; overflow: hidden; display: flex; justify-content: space-between; align-items: center;
-  min-height: 36px; margin-bottom: 4px; padding: 0 10px; border-radius: 8px; font-size: 15px;
-}
+/* Order book: sells on top, the spread, buys below; bars show the running total */
+.book { display: flex; flex-direction: column; gap: 0; padding-top: 16px; border-top: 1px solid var(--line); }
+.book h3 { margin: 0 0 8px; }
+.book-head, .level { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 0 10px; }
+.book-head { font-size: 12px; font-weight: 700; color: var(--muted); }
+.book-head span:not(:first-child), .level > span:not(.level-bar) { text-align: right; }
+.level { position: relative; overflow: hidden; align-items: center; min-height: 32px; font-size: 15px; }
 .level > * { position: relative; }
-.level-bar { position: absolute; left: 0; top: 0; bottom: 0; }
-.level-ask .level-bar { background: var(--buy-soft); }
-.level-ask strong { color: var(--buy-ink); }
-.level-bid .level-bar { background: var(--sell-soft); }
-.level-bid strong { color: var(--sell-ink); }
+.level > .level-bar { position: absolute; right: 0; left: auto; top: 0; bottom: 0; transition: width 0.4s ease; }
+.level-ask .level-bar { background: var(--sell-soft); }
+.level-ask strong { color: var(--sell-ink); }
+.level-bid .level-bar { background: var(--buy-soft); }
+.level-bid strong { color: var(--buy-ink); }
+.book-spread {
+  display: flex; justify-content: center; align-items: baseline; gap: 8px; margin: 4px 0; padding: 10px;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-weight: 600; color: var(--muted);
+}
+.book-spread strong { font-size: 18px; color: var(--navy); }
 
 /* Account */
 .balances { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 12px; }
@@ -160,3 +161,23 @@ fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
 .movement-time { font-size: 13px; color: var(--muted); }
 .movement-amount { flex: none; font-size: 17px; font-weight: 700; color: var(--navy); }
 .movement[data-positive="true"] .movement-amount { color: var(--buy-ink); }
+
+/* My orders */
+.card-wide { flex-basis: 100%; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.empty { margin: 0; color: var(--muted); }
+.empty[hidden] { display: none; }
+.order { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 0; border-top: 1px solid var(--line); }
+.order-side { flex: none; min-width: 72px; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; text-align: center; background: var(--sell-soft); color: var(--sell-ink); }
+.order[data-buy="true"] .order-side { background: var(--buy-soft); color: var(--buy-ink); }
+.order-text { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; }
+.order-title { font-weight: 700; color: var(--navy); }
+.order-sub { font-size: 13px; color: var(--muted); }
+.order-reason { font-size: 13px; font-weight: 600; color: var(--sell-ink); }
+.order-status { flex: none; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; background: var(--tab-bg); color: var(--muted); }
+.order[data-status="OPEN"] .order-status, .order[data-status="PARTIALLY_FILLED"] .order-status { background: #E8F0FD; color: #1D4FA0; }
+.order[data-status="PENDING"] .order-status { background: #FFF4C2; color: #6B5A00; }
+.order[data-status="FILLED"] .order-status { background: var(--buy-soft); color: var(--buy-ink); }
+.order[data-status="REJECTED"] .order-status { background: var(--sell-soft); color: var(--sell-ink); }
+.order-action { flex: none; min-width: 104px; display: flex; justify-content: flex-end; }
+.order-cancel { min-height: 44px; padding: 0 18px; border: 1.5px solid var(--field-line); border-radius: 12px; background: #fff; color: var(--navy); font-size: 14px; font-weight: 700; }

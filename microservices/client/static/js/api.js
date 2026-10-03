@@ -12,8 +12,10 @@ async function call(method, path, userName, body) {
   return payload.data;
 }
 
-export const getMarket = () => call('GET', '/market/orderbook/BRL-VIB?depth=5');
+export const getMarket = (depth) => call('GET', `/market/orderbook/BRL-VIB?depth=${depth}`);
 export const getWallet = (userName) => call('GET', '/wallet', userName);
 export const getMovements = (userName) => call('GET', '/wallet/movements?limit=5', userName);
 export const postOrder = (userName, body) => call('POST', '/orders', userName, body);
 export const postDeposit = (userName, body) => call('POST', '/wallet/deposits', userName, body);
+export const getOrders = (userName) => call('GET', '/orders?limit=50', userName);
+export const closeOrder = (userName, orderId) => call('POST', `/orders/${orderId}/close`, userName);
