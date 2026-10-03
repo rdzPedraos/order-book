@@ -162,6 +162,10 @@ La página MUST mostrar un botón Cancelar en cada orden activa y MUST NOT mostr
 - **WHEN** la persona pulsa Cancelar en una orden `OPEN`
 - **THEN** envía `POST /orders/{orderId}/close` con su `X-User-ID`, dice que pidió la cancelación y vuelve a consultar de inmediato
 
+#### Scenario: Cancelación pedida
+- **WHEN** la persona pidió cancelar una orden y la API respondió `201`, pero la lectura todavía la trae activa
+- **THEN** la orden muestra que la cancelación fue pedida y espera a aplicarse, y no muestra el botón Cancelar
+
 #### Scenario: Cancelación aplicada
 - **WHEN** la cancelación ya se aplicó y llega el siguiente refresco
 - **THEN** la orden pasa a `CANCELLED`, el botón Cancelar desaparece y el filtro Activas ya no la muestra

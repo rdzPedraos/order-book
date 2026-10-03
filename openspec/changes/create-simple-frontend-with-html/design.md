@@ -47,14 +47,15 @@ microservices/client/static/
     order.js          puro: buildOrderBody, getReserve, validateOrder, getVisibleFields
     deposit.js        puro: buildDepositBody, validateDeposit
     name.js           puro: chooseName, loadName, saveName (el storage se recibe como parámetro)
-    present.js        puro: getLevelRows, getBalanceRows, getAvailableFunds, describeMovement (datos de la API → filas a pintar)
+    orders.js         puro: isActive, filterOrders, describeOrder (orden de la API → fila a pintar)
+    present.js        puro: getLevelRows, getSpread, getBalanceRows, getAvailableFunds, describeMovement (datos de la API → filas a pintar)
     readings.js       puro: applyReadings (una lectura que falló no borra lo último que se mostró)
     api.js            fetch con X-User-ID y errores; sin lógica
     app.js            estado, polling, pintar el DOM, eventos
 ```
 
 - Los módulos son ES modules (`<script type="module">`): nada que compilar. Cada archivo queda por debajo de 300 líneas.
-- **Lo puro se prueba, el wiring no.** `amount.js`, `order.js`, `deposit.js`, `name.js`, `present.js` y `readings.js` no tocan el DOM ni la red (el `localStorage` entra como parámetro) y tienen sus `*.test.js` al lado. `api.js` y `app.js` son wiring, como `main` en Go, y quedan fuera del umbral de cobertura; sus escenarios se comprueban en la prueba de humo.
+- **Lo puro se prueba, el wiring no.** `amount.js`, `order.js`, `deposit.js`, `orders.js`, `name.js`, `present.js` y `readings.js` no tocan el DOM ni la red (el `localStorage` entra como parámetro) y tienen sus `*.test.js` al lado. `api.js` y `app.js` son wiring, como `main` en Go, y quedan fuera del umbral de cobertura; sus escenarios se comprueban en la prueba de humo.
 - **Dinero:** los montos son strings decimales y nunca `Number`. `parseAmount(text, decimals)` devuelve `BigInt` en unidades mínimas (centavos de BRL, VIB enteros) o `null`; `formatAmount` hace el camino inverso. Los decimales vienen de una tabla `{BRL: 2, VIB: 0}`, no de un `* 100`. Mismo criterio que `shared/money`.
 - **Salida de texto:** todo lo que escribe la persona (el nombre) o devuelve la API (mensajes de error) se pinta con `textContent`, nunca con `innerHTML`.
 
@@ -64,15 +65,17 @@ microservices/client/static/
 cada 2 s (y justo después de una escritura 201):
   GET /market/orderbook/BRL-VIB?depth=5      ┐
   GET /wallet                                ├─ en paralelo, con Promise.allSettled
-  GET /wallet/movements?limit=5              ┘  (las dos últimas solo si hay nombre)
+  GET /wallet/movements?limit=5              │  (las tres últimas solo si hay nombre)
+  GET /orders?limit=50                       ┘
   por cada respuesta exitosa → reemplaza su parte del estado y repinta su zona
 ```
 
 - Un `setInterval(refresh, 2000)` y nada más. Si la vuelta anterior sigue en vuelo, la siguiente se salta (una bandera), para no apilar peticiones.
+- **Las filas del libro se crean una sola vez** (6 por lado) y cada vuelta solo cambia su texto y el ancho de su barra, con una transición corta: la lista no parpadea ni cambia de altura aunque el libro cambie o un lado quede vacío.
 - **Se repinta cada zona de datos** (libro, saldos, movimientos), **nunca los campos del formulario**, así lo que la persona está escribiendo no se pierde.
 - **Sin merge ni diff:** la respuesta reemplaza lo anterior. Si una lectura falla, esa zona conserva lo último que mostró y se reintenta en la próxima vuelta; no hay reintentos ni backoff.
 - **Después de una escritura** se llama al mismo `refresh()`. La API documenta que una lectura puede ir unos milisegundos atrasada; la vuelta de 2 s la corrige sola.
-- **Qué se pide:** `depth=5` por lado (4 filas alcanzan en la maqueta, 5 deja margen) y `limit=5` de movimientos, por la maqueta.
+- **Qué se pide:** `depth=6` por lado y `limit=5` de movimientos, por la maqueta.
 - **Alternativas descartadas:** SSE o WebSocket (la API no los tiene y agregaría un servicio de push); pausar el polling con la pestaña oculta (más lógica por una demo); refrescar solo lo que cambió (exige comparar).
 
 ### D4. Estado mínimo
@@ -90,6 +93,13 @@ Un objeto en memoria: `{ name, book, wallet, movements, busy }`.
 - `validateOrder(...)` devuelve el texto del problema o `''`: valor que no es un número mayor que 0 con los decimales de la moneda, o reserva mayor que `available` de la última lectura del wallet. No reemplaza a la API, solo evita el viaje y da un mensaje claro.
 - **El rechazo asíncrono por fondos** (`REJECTED`, `insufficient_funds`) no se consulta: no se hace seguimiento de la orden. Ver riesgos.
 
+### D5b. Mis órdenes
+
+- **Lectura:** `GET /orders?limit=50`, las 50 más recientes. `GET /orders` filtra por un solo `status` y las activas son tres, así que `filterOrders(orders, 'ACTIVE' | 'ALL')` filtra en la página. El filtro es un par de radios (Activas | Todas, Activas por defecto) y no genera llamadas.
+- **Cada fila** sale de `describeOrder(order)`: lado, descripción (`Compra 10 VIB · límite R$ 90.00`, `Compra de mercado · gasta R$ 500.00`), estado con su etiqueta, lo ejecutado (`filledQuantity` de `quantity` y `avgPrice`), la razón de las canceladas y rechazadas, y `canCancel`. La razón viene de `reason` (`no_liquidity`, `insufficient_funds`, `invalid_amount`); una orden `CANCELLED` sin `reason` se muestra como «Cancelada por ti».
+- **Cancelar:** `POST /orders/{id}/close`. La API responde `201` con la orden sin cambios, porque la cancelación se aplica de forma asíncrona; la página avisa que pidió la cancelación y refresca de inmediato. Mientras la lectura siga trayendo la orden activa, la página guarda en memoria que se pidió cancelarla y, en lugar del botón, muestra «Cancelación pedida»: la orden no se oculta ni cambia de estado, porque el estado que se muestra sigue siendo el que la API leyó. Las lecturas llegan de proyecciones que pueden ir atrasadas (con mucha carga, minutos), y sin este aviso la persona pulsaría Cancelar otra vez sin saber que ya está pedido. La marca se olvida cuando la orden llega final. Pulsarlo dos veces es seguro (la API lo documenta).
+- **Alternativas descartadas:** pedir una lista por cada estado activo (3 llamadas por vuelta); ocultar la orden al pulsar Cancelar sin esperar a la API (mostraría un estado que puede no ser real, porque la orden pudo ejecutarse antes).
+
 ### D6. Cargar dinero
 
 Un selector BRL | VIB, un campo y un botón. Reutiliza `parseAmount` con los decimales de la moneda elegida y llama a `POST /wallet/deposits`. Al cambiar la moneda el campo se prellena con un valor razonable (`150.00` o `10`) y la persona lo edita o confirma.
@@ -104,7 +114,7 @@ Un selector BRL | VIB, un campo y un botón. Reutiliza `parseAmount` con los dec
 ### D8. Pruebas, siguiendo `go.md`
 
 - **Go:** `microservices/client/main_test.go` levanta `buildApp()` como `wallet-service` y comprueba que `GET /` responde la página y que `GET /app.css` responde el CSS. `main` queda fuera del umbral de 85 %, pero el escenario "Abrir la página" queda cubierto.
-- **JavaScript:** `node --test` sobre `static/js/*.test.js`, con `node:assert` y un `test()` explícito por escenario del spec, sin tabla de casos con `for`, igual que en Go. Se mide cobertura de los seis módulos puros con `--experimental-test-coverage` y deben llegar al 85 %.
+- **JavaScript:** `node --test` sobre `static/js/*.test.js`, con `node:assert` y un `test()` explícito por escenario del spec, sin tabla de casos con `for`, igual que en Go. Se mide cobertura de los siete módulos puros con `--experimental-test-coverage` y deben llegar al 85 %.
 - **Por qué `node --test`:** viene dentro de Node, no instala paquetes y su único `package.json`, en `microservices/client/` (fuera de `static/`, así que no se sirve), solo declara `"type": "module"` para que `node` lea los módulos, sin dependencias. Node ya existe en los runners de GitHub Actions. Alternativas descartadas: no probar el JavaScript (rompe la regla de TDD del proyecto), un motor de JavaScript embebido en Go como `goja` (una dependencia Go por probar tres funciones), o un framework (Jest, Vitest: `node_modules` y build).
 - **CI:** un paso nuevo en `.github/workflows/test.yml` que corre los tests de JavaScript y su cobertura.
 - **Manual (no automatizable aquí):** una prueba de humo en el cluster, con los pasos de `tasks.md`, porque no hay navegador en CI.
@@ -122,7 +132,7 @@ Valores fijos de la maqueta, para no depender del artifact:
 | Fondo / texto / texto secundario | `#F4F4F6` / `#33355C` / `#5F6288` |
 | Títulos / cuerpo | Bricolage Grotesque 800 / Figtree, de Google Fonts, con `system-ui` de respaldo |
 
-- **Estructura:** header con logo y nombre; hero amarillo con título y el campo del nombre; debajo dos tarjetas: *Operar* (Comprar | Vender, Límite | Mercado, campos, Confirmar, y el volumen del mercado) y *Mi cuenta* (saldos BRL y VIB, Cargar dinero, 5 movimientos).
+- **Estructura:** header con logo y nombre; hero amarillo con título y el campo del nombre; debajo dos tarjetas: *Operar* (Comprar | Vender, Límite | Mercado, campos, Confirmar, y el volumen del mercado en una sola lista: ventas en rojo arriba, spread en medio, compras en verde abajo, con barras del volumen acumulado) *Mi cuenta* (saldos BRL y VIB, Cargar dinero, 5 movimientos), y debajo, a todo el ancho, *Mis órdenes* (filtro Activas | Todas, lista y botón Cancelar).
 - Las variables van como custom properties en `:root`. En pantalla estrecha las dos tarjetas se apilan (`flex-wrap`), sin scroll horizontal.
 - Las fuentes se cargan de Google Fonts: la demo necesita internet para verlas con la tipografía del diseño; sin red cae a `system-ui` y todo funciona.
 
@@ -130,7 +140,7 @@ Valores fijos de la maqueta, para no depender del artifact:
 
 - **[Una orden rechazada por fondos no se nota]** El engine puede rechazarla de forma asíncrona aunque la página haya comprobado el saldo (otra persona con el mismo nombre gastó el saldo en medio). → Aceptado: el dinero no se reserva, no aparece el movimiento `RESERVE` y el saldo no cambia. Si molesta en la demo, se puede consultar `GET /orders/{id}` hasta que salga de `PENDING`; queda fuera de este change.
 - **[Dos personas con el mismo nombre comparten cuenta]** → Aceptado en una demo; el nombre solo identifica.
-- **[Carga de 3 lecturas cada 2 s por pestaña]** ≈ 1,5 req/s por pestaña abierta. → Aceptable con 2 réplicas de `market` y de `wallet-api`; se vigila en el benchmark de la demo.
+- **[Carga de 4 lecturas cada 2 s por pestaña]** ≈ 2 req/s por pestaña abierta, una de ellas de hasta 50 órdenes. → Aceptable con 2 réplicas de `market` y de `wallet-api`; se vigila en el benchmark de la demo.
 - **[La maqueta y la página se separan]** El artifact queda como referencia, no se mantiene sincronizado. → La fuente guardada en `mockup/` y la tabla de D9 son suficientes para rehacer un cambio visual.
 - **[Sin pruebas en un navegador real]** → La lógica con riesgo está en funciones puras probadas; el resto se cubre con la prueba de humo manual.
 - **[El template del chart hoy asume base de datos en todo Deployment]** → Se corrige en D7 y se verifica con `helm template`.

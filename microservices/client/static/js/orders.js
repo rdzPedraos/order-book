@@ -52,7 +52,11 @@ function describeReason(order) {
   return '';
 }
 
-export function describeOrder(order, formatTime = formatLocalTime) {
+const CANCEL_REQUESTED = 'Cancelación pedida, esperando que se aplique';
+
+export function describeOrder(order, formatTime = formatLocalTime, isCancelRequested = false) {
+  const isWaiting = isCancelRequested && isActive(order);
+
   return {
     orderId: order.orderId,
     shortId: `#${order.orderId.slice(-6)}`,
@@ -62,8 +66,8 @@ export function describeOrder(order, formatTime = formatLocalTime) {
     progress: describeProgress(order),
     statusLabel: STATUS_LABELS[order.status] ?? order.status,
     status: order.status,
-    reason: describeReason(order),
-    canCancel: isActive(order),
+    reason: isWaiting ? CANCEL_REQUESTED : describeReason(order),
+    canCancel: isActive(order) && !isWaiting,
     time: formatTime(order.createdAt),
   };
 }

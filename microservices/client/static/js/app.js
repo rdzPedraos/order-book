@@ -4,7 +4,7 @@
 import * as api from './api.js';
 import { buildDepositBody, validateDeposit } from './deposit.js';
 import { loadName, saveName, chooseName } from './name.js';
-import { describeOrder, filterOrders } from './orders.js';
+import { describeOrder, filterOrders, isActive } from './orders.js';
 import { buildOrderBody, describeUnits, getReserve, getVisibleFields, validateOrder } from './order.js';
 import { describeMovement, getAvailableFunds, getBalanceRows, getLevelRows, getSpread } from './present.js';
 import { applyReadings } from './readings.js';
@@ -23,6 +23,7 @@ const DEPOSIT_DEFAULTS = { BRL: '150.00', VIB: '10' };
 
 const state = { name: '', book: null, wallet: null, movements: null, orders: null, busy: false };
 let paintedOrders = '';
+const cancelRequested = new Set();
 
 const byId = (id) => document.getElementById(id);
 const getChecked = (name) => document.querySelector(`input[name="${name}"]:checked`).value;
@@ -97,7 +98,9 @@ function paintMovements() {
 // The list is rebuilt only when what it shows changed, so a click on Cancelar
 // is not lost to a repaint that swaps the button under the cursor.
 function paintOrders() {
-  const shown = filterOrders(state.orders, getChecked('orders-filter')).map((order) => describeOrder(order));
+  forgetFinishedCancellations();
+  const shown = filterOrders(state.orders, getChecked('orders-filter'))
+    .map((order) => describeOrder(order, undefined, cancelRequested.has(order.orderId)));
   const signature = JSON.stringify(shown);
   byId('orders-empty').hidden = shown.length > 0;
   if (signature === paintedOrders) return;
@@ -120,6 +123,12 @@ function paintOrders() {
     return row;
   });
   byId('orders').replaceChildren(...rows);
+}
+
+function forgetFinishedCancellations() {
+  for (const order of state.orders ?? []) {
+    if (!isActive(order)) cancelRequested.delete(order.orderId);
+  }
 }
 
 function makeCancelButton(orderId) {
@@ -213,7 +222,9 @@ async function cancelOrder(orderId) {
   } catch (error) {
     return showMessage('orders-message', error.message, 'error');
   }
+  cancelRequested.add(orderId);
   showMessage('orders-message', 'Pediste cancelar la orden. Se aplica en un momento.', 'ok');
+  paintOrders();
   refresh();
 }
 

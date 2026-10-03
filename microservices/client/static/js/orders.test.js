@@ -144,3 +144,25 @@ test('describeOrder carries the id to cancel and a short code to show', () => {
   assert.equal(described.orderId, 'a-open');
   assert.equal(described.shortId, '#a-open');
 });
+
+test('Cancelación pedida: an active order waiting to be cancelled has no button and says so', () => {
+  const described = describeOrder(open, formatTime, true);
+
+  assert.equal(described.canCancel, false);
+  assert.equal(described.reason, 'Cancelación pedida, esperando que se aplique');
+  assert.equal(described.statusLabel, 'Abierta');
+});
+
+test('Cancelación pedida: a final order ignores the request', () => {
+  const described = describeOrder(cancelled, formatTime, true);
+
+  assert.equal(described.reason, 'Cancelada por ti');
+  assert.equal(described.canCancel, false);
+});
+
+test('without a request an active order keeps its button and no note', () => {
+  const described = describeOrder(open, formatTime, false);
+
+  assert.equal(described.canCancel, true);
+  assert.equal(described.reason, '');
+});
