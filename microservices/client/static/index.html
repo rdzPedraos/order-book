@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vibranium Exchange</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&amp;family=Figtree:wght@400;600;700&amp;display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="top">
+  <header class="wrap header">
+    <div class="brand">
+      <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="11" fill="#2D3277"/><path d="M9 11 L18 27 L27 11" fill="none" stroke="#FFE600" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="brand-name">Vibranium</span>
+    </div>
+    <div class="user-chip">
+      <span class="user-initial" id="user-initial">?</span>
+      <span id="user-name">sin nombre</span>
+    </div>
+  </header>
+
+  <section class="wrap hero">
+    <h1>Compra y vende <br>VIB en un toque</h1>
+    <label class="name-field">
+      <span>Tu nombre ficticio</span>
+      <input id="name-input" type="text" placeholder="ej. luna_vib" autocomplete="off">
+    </label>
+  </section>
+</div>
+
+<main class="wrap cards">
+
+  <section class="card" id="trade" data-side="BUY" aria-labelledby="trade-title">
+    <h2 id="trade-title">Operar</h2>
+
+    <fieldset class="tabs tabs-side">
+      <legend class="sr-only">Comprar o vender</legend>
+      <label class="tab tab-buy"><input type="radio" name="side" value="BUY" checked><span>Comprar</span></label>
+      <label class="tab tab-sell"><input type="radio" name="side" value="SELL"><span>Vender</span></label>
+    </fieldset>
+
+    <fieldset class="tabs tabs-type">
+      <legend class="sr-only">Tipo de orden</legend>
+      <label class="tab"><input type="radio" name="type" value="LIMIT" checked><span>Límite</span></label>
+      <label class="tab"><input type="radio" name="type" value="MARKET"><span>Mercado</span></label>
+    </fieldset>
+    <p class="hint" id="case-hint"></p>
+
+    <label class="field" data-field="limit">
+      <span id="limit-label">Pagar como máximo (por VIB)</span>
+      <span class="input-box"><span class="unit unit-left">R$</span><input id="limit" type="text" inputmode="decimal" value="90.00"></span>
+    </label>
+    <label class="field" data-field="quantity">
+      <span>Cantidad</span>
+      <span class="input-box"><span class="unit unit-right">VIB</span><input id="quantity" class="pad-right" type="text" inputmode="numeric" value="10"></span>
+    </label>
+    <label class="field" data-field="amount" hidden>
+      <span>Monto a gastar</span>
+      <span class="input-box"><span class="unit unit-left">R$</span><input id="amount" type="text" inputmode="decimal" value="500.00"></span>
+    </label>
+
+    <button class="confirm" id="confirm" type="button">Confirmar compra</button>
+    <div class="message" id="order-message" role="status" hidden></div>
+
+    <div class="depth">
+      <h3>Volumen en el mercado</h3>
+      <div class="depth-columns">
+        <div>
+          <div class="depth-head depth-head-sell"><span>Ventas · precio</span><span>VIB</span></div>
+          <div id="asks"></div>
+        </div>
+        <div>
+          <div class="depth-head depth-head-buy"><span>Compras · precio</span><span>VIB</span></div>
+          <div id="bids"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="wallet-title">
+    <h2 id="wallet-title">Mi cuenta</h2>
+
+    <div class="balances">
+      <div class="balance" data-currency="BRL">
+        <span class="balance-currency">BRL</span>
+        <span class="balance-total">R$ 0.00</span>
+        <span class="balance-reserved">Reservado R$ 0.00</span>
+      </div>
+      <div class="balance" data-currency="VIB">
+        <span class="balance-currency">VIB</span>
+        <span class="balance-total">0 VIB</span>
+        <span class="balance-reserved">Reservado 0 VIB</span>
+      </div>
+    </div>
+
+    <div class="deposit">
+      <fieldset class="tabs tabs-type">
+        <legend class="sr-only">Moneda a cargar</legend>
+        <label class="tab"><input type="radio" name="deposit-currency" value="BRL" checked><span>BRL</span></label>
+        <label class="tab"><input type="radio" name="deposit-currency" value="VIB"><span>VIB</span></label>
+      </fieldset>
+      <div class="deposit-row">
+        <label class="field">
+          <span>Cargar dinero</span>
+          <span class="input-box"><input id="deposit-amount" type="text" inputmode="decimal" value="150.00"></span>
+        </label>
+        <button class="deposit-button" id="deposit-button" type="button">Cargar</button>
+      </div>
+      <div class="message" id="deposit-message" role="status" hidden></div>
+    </div>
+
+    <div>
+      <h3>Movimientos</h3>
+      <div id="movements"></div>
+    </div>
+  </section>
+
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

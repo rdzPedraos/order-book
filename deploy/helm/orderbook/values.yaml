@@ -11,7 +11,9 @@ books:
 
 # One entry point for clients (design D3). Only the public routes have a
 # rule: /.well-known/* is for the probes, and /wallet goes only to the api
-# role, where /wallet/internal/funds:batch does not exist.
+# role, where /wallet/internal/funds:batch does not exist. / is the static
+# page of the demo: the controller picks the longest prefix, so the API
+# routes win over it.
 ingress:
   className: nginx
   host: orderbook.local
@@ -19,13 +21,15 @@ ingress:
     /orders: order-api
     /wallet: wallet-api
     /market: market
+    /: client
   # Redpanda Console, the web UI of the log: topics, messages and consumer
   # lag. It serves from /, so it gets its own host.
   consoleHost: console.orderbook.local
 
 # The stateless services, one Deployment each (design D2). A deployment with
 # http serves its routes on port 8000 behind a Service of the same name; the
-# others only read the log and answer their probes on the metrics port.
+# others only read the log and answer their probes on the metrics port. One
+# without a database gets neither the common ConfigMap nor DB_* (client).
 deployments:
   order-api:
     service: order-service
@@ -67,15 +71,24 @@ deployments:
     env:
       EVENT_LOG_GROUP: market-service
 
+  client:
+    service: client
+    replicas: 1
+    http: true
+    env:
+      HTTP_PORT: "8000"
+      METRICS_PORT: "2121"
+      GOFR_TELEMETRY: "false"
+
 resources:
-  requests: {cpu: 100m, memory: 64Mi}
-  limits: {memory: 256Mi}
+  requests: { cpu: 100m, memory: 64Mi }
+  limits: { memory: 256Mi }
 
 engine:
   storage: 1Gi
   resources:
-    requests: {cpu: 500m, memory: 256Mi}
-    limits: {memory: 1Gi}
+    requests: { cpu: 500m, memory: 256Mi }
+    limits: { memory: 1Gi }
 
 postgres:
   enabled: true

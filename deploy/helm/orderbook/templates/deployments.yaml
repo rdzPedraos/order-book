@@ -18,13 +18,17 @@ spec:
         - name: {{ $deployment.service }}
           image: {{ include "orderbook.image" (dict "root" $ "service" $deployment.service) }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- if $deployment.database }}
           envFrom:
             - configMapRef:
                 name: {{ $.Release.Name }}-common
+          {{- end }}
           env:
+            {{- if $deployment.database }}
             {{- include "orderbook.dbPassword" $ | nindent 12 }}
             - name: DB_NAME
               value: {{ $deployment.database }}
+            {{- end }}
             {{- with $deployment.role }}
             - name: ROLE
               value: {{ . }}

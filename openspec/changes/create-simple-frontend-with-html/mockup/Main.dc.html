@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Vibranium Exchange</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+button,input{font-family:inherit}
+button{cursor:pointer}
+button:hover{filter:brightness(0.95)}
+button:focus-visible,input:focus-visible{outline:3px solid #2968C8;outline-offset:2px}
+input:focus{border-color:#2968C8 !important}
+</style>
+</helmet>
+<div style="background:#F4F4F6;color:#33355C;font-family:'Figtree',system-ui,sans-serif;font-size:16px;line-height:1.45;font-variant-numeric:tabular-nums">
+
+<!-- ============ HEADER + HERO ============ -->
+<div style="background:#FFE600;position:relative;overflow:hidden">
+<div style="position:absolute;right:-120px;top:-160px;width:520px;height:520px;border-radius:50%;background:rgba(255,255,255,0.38)"></div>
+<div style="position:absolute;left:-60px;bottom:-90px;width:220px;height:220px;border-radius:50%;background:#2968C8;opacity:0.9"></div>
+<div style="position:absolute;left:150px;bottom:40px;width:34px;height:34px;border-radius:50%;background:#2D3277"></div>
+
+<header style="position:relative;max-width:1200px;margin:0 auto;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px">
+<div style="display:flex;align-items:center;gap:10px;color:#2D3277">
+<svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="11" fill="#2D3277"></rect><path d="M9 11 L18 27 L27 11" fill="none" stroke="#FFE600" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+<span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:22px;letter-spacing:-0.02em">Vibranium</span>
+</div>
+<div style="display:flex;align-items:center;gap:10px;background:#fff;border-radius:999px;padding:6px 18px 6px 6px;color:#2D3277;font-weight:700;box-shadow:0 1px 2px rgba(45,50,119,0.18)">
+<span style="width:32px;height:32px;border-radius:50%;background:#2968C8;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800">{{initial}}</span>
+<span>{{name}}</span>
+</div>
+</header>
+
+<section style="position:relative;max-width:1200px;margin:0 auto;padding:24px 24px 96px;display:flex;flex-wrap:wrap;gap:40px;align-items:center">
+<div style="flex:1 1 440px;min-width:0;display:flex;flex-direction:column;gap:20px;color:#2D3277">
+<h1 style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:clamp(40px,6vw,64px);line-height:1;letter-spacing:-0.03em;text-wrap:balance">Compra y vende <br>VIB en un toque</h1>
+<label style="display:flex;flex-direction:column;gap:8px;max-width:420px;font-weight:700">
+<span>Tu nombre ficticio</span>
+<input type="text" value="{{nameDraft}}" onChange="{{setName}}" placeholder="ej. luna_vib" autocomplete="off" style="width:100%;box-sizing:border-box;height:52px;border:2px solid #fff;background:#fff;border-radius:14px;padding:0 16px;font-size:16px;font-weight:600;color:#2D3277">
+</label>
+</div>
+
+
+</section>
+</div>
+
+<main style="max-width:1200px;margin:-48px auto 0;padding:0 24px 48px;position:relative;display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start">
+
+<!-- ============ OPERAR ============ -->
+<section aria-labelledby="t-operar" style="flex:1 1 440px;min-width:0;background:#fff;border-radius:20px;padding:24px;box-shadow:0 1px 2px rgba(45,50,119,0.08),0 8px 24px rgba(45,50,119,0.06);display:flex;flex-direction:column;gap:16px">
+<h2 id="t-operar" style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:24px;color:#2D3277">Operar</h2>
+
+<div style="display:flex;gap:6px;background:#EEEFF6;padding:6px;border-radius:14px">
+<button type="button" onClick="{{chooseBuy}}" style="{{tabBuyStyle}}">Comprar</button>
+<button type="button" onClick="{{chooseSell}}" style="{{tabSellStyle}}">Vender</button>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;gap:6px;background:#EEEFF6;padding:4px;border-radius:12px;align-self:flex-start">
+<button type="button" onClick="{{chooseLimit}}" style="{{tabLimitStyle}}">Límite</button>
+<button type="button" onClick="{{chooseMarket}}" style="{{tabMarketStyle}}">Mercado</button>
+</div>
+<p style="margin:0;color:#5F6288;font-size:14px;text-wrap:pretty">{{caseHint}}</p>
+</div>
+
+<sc-if value="{{showLimit}}" hint-placeholder-val="{{ true }}">
+<label style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px;color:#5F6288">
+<span>{{limitLabel}}</span>
+<span style="position:relative;display:block">
+<span style="position:absolute;left:14px;top:0;height:48px;display:flex;align-items:center;font-weight:700;color:#2D3277">R$</span>
+<input type="text" inputmode="decimal" value="{{limitValue}}" onChange="{{setLimit}}" style="width:100%;box-sizing:border-box;height:48px;border:1.5px solid #D5D7E6;border-radius:12px;padding:0 14px 0 44px;font-size:16px;font-weight:600;color:#2D3277">
+</span>
+</label>
+</sc-if>
+
+<sc-if value="{{showQty}}" hint-placeholder-val="{{ true }}">
+<label style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px;color:#5F6288">
+<span>Cantidad</span>
+<span style="position:relative;display:block">
+<span style="position:absolute;right:14px;top:0;height:48px;display:flex;align-items:center;font-weight:700;color:#5F6288">VIB</span>
+<input type="text" inputmode="numeric" value="{{qtyValue}}" onChange="{{setQty}}" style="width:100%;box-sizing:border-box;height:48px;border:1.5px solid #D5D7E6;border-radius:12px;padding:0 54px 0 14px;font-size:16px;font-weight:600;color:#2D3277">
+</span>
+</label>
+</sc-if>
+
+<sc-if value="{{showAmount}}" hint-placeholder-val="{{ false }}">
+<label style="display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px;color:#5F6288">
+<span>Monto a gastar</span>
+<span style="position:relative;display:block">
+<span style="position:absolute;left:14px;top:0;height:48px;display:flex;align-items:center;font-weight:700;color:#2D3277">R$</span>
+<input type="text" inputmode="decimal" value="{{amountValue}}" onChange="{{setAmount}}" style="width:100%;box-sizing:border-box;height:48px;border:1.5px solid #D5D7E6;border-radius:12px;padding:0 14px 0 44px;font-size:16px;font-weight:600;color:#2D3277">
+</span>
+</label>
+</sc-if>
+
+<button type="button" onClick="{{placeOrder}}" style="{{ctaStyle}}">{{ctaLabel}}</button>
+
+<sc-if value="{{hasMsg}}" hint-placeholder-val="{{ false }}">
+<div role="status" style="{{msgStyle}}">{{msg}}</div>
+</sc-if>
+
+<div style="border-top:1px solid #ECEDF4;padding-top:16px;display:flex;flex-direction:column;gap:12px">
+<h3 style="margin:0;font-size:14px;font-weight:700;color:#5F6288;text-transform:uppercase;letter-spacing:0.04em">Volumen en el mercado</h3>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:16px">
+<div style="display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#00662F;padding:0 10px"><span>Ventas · precio</span><span>VIB</span></div>
+<sc-for list="{{asks}}" as="row" hint-placeholder-count="4">
+<div style="position:relative;overflow:hidden;display:flex;justify-content:space-between;align-items:center;min-height:36px;border-radius:8px;padding:0 10px;font-size:15px">
+<span style="position:absolute;left:0;top:0;bottom:0;width:{{row.pct}};background:#E2F5EA"></span>
+<strong style="position:relative;color:#00662F">{{row.price}}</strong>
+<span style="position:relative;font-weight:600">{{row.volume}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:4px">
+<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#A8182A;padding:0 10px"><span>Compras · precio</span><span>VIB</span></div>
+<sc-for list="{{bids}}" as="row" hint-placeholder-count="4">
+<div style="position:relative;overflow:hidden;display:flex;justify-content:space-between;align-items:center;min-height:36px;border-radius:8px;padding:0 10px;font-size:15px">
+<span style="position:absolute;left:0;top:0;bottom:0;width:{{row.pct}};background:#FDECEE"></span>
+<strong style="position:relative;color:#A8182A">{{row.price}}</strong>
+<span style="position:relative;font-weight:600">{{row.volume}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ============ MI CUENTA ============ -->
+<section aria-labelledby="t-wallet" style="flex:1 1 440px;min-width:0;background:#fff;border-radius:20px;padding:24px;box-shadow:0 1px 2px rgba(45,50,119,0.08),0 8px 24px rgba(45,50,119,0.06);display:flex;flex-direction:column;gap:20px">
+<h2 id="t-wallet" style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:24px;color:#2D3277">Mi cuenta</h2>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:12px">
+<div style="background:#2D3277;color:#fff;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:6px">
+<span style="font-weight:700;color:#FFE600">BRL</span>
+<span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-0.02em">{{brlTotal}}</span>
+<span style="font-size:13px;opacity:0.9">Reservado {{brlRes}}</span>
+</div>
+<div style="background:#2D3277;color:#fff;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:6px">
+<span style="font-weight:700;color:#FFE600">VIB</span>
+<span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-0.02em">{{vibTotal}}</span>
+<span style="font-size:13px;opacity:0.9">Reservado {{vibRes}}</span>
+</div>
+</div>
+
+<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+<label style="flex:1 1 180px;min-width:0;display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:14px;color:#5F6288">
+<span>Cargar dinero</span>
+<span style="position:relative;display:block">
+<span style="position:absolute;left:14px;top:0;height:48px;display:flex;align-items:center;font-weight:700;color:#2D3277">R$</span>
+<input type="text" inputmode="decimal" value="{{depositValue}}" onChange="{{setDeposit}}" style="width:100%;box-sizing:border-box;height:48px;border:1.5px solid #D5D7E6;border-radius:12px;padding:0 14px 0 44px;font-size:16px;font-weight:600;color:#2D3277">
+</span>
+</label>
+<button type="button" onClick="{{makeDeposit}}" style="height:48px;padding:0 28px;border:0;border-radius:12px;background:#2968C8;color:#fff;font-weight:700;font-size:16px">Cargar</button>
+</div>
+<sc-if value="{{hasDepMsg}}" hint-placeholder-val="{{ false }}">
+<div role="status" style="{{depMsgStyle}}">{{depMsg}}</div>
+</sc-if>
+
+<div style="display:flex;flex-direction:column">
+<h3 style="margin:0 0 4px;font-size:14px;font-weight:700;color:#5F6288;text-transform:uppercase;letter-spacing:0.04em">Movimientos</h3>
+<sc-for list="{{movements}}" as="mv" hint-placeholder-count="5">
+<div style="display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid #ECEDF4">
+<span style="flex:none;width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;background:{{mv.chipBg}};color:{{mv.chipInk}}">{{mv.cur}}</span>
+<span style="flex:1 1 auto;min-width:0;display:flex;flex-direction:column">
+<strong style="color:#2D3277">{{mv.label}}</strong>
+<span style="font-size:13px;color:#5F6288">{{mv.time}}</span>
+</span>
+<strong style="flex:none;font-size:17px;color:{{mv.tone}}">{{mv.amount}}</strong>
+</div>
+</sc-for>
+</div>
+</section>
+</main>
+</div>
+</x-dc>
+
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1500}}'>
+const INK = '#2D3277';
+const GREEN = '#00803F';
+const RED = '#D6293C';
+const BEST_BID = 10000;
+const BEST_ASK = 10100;
+
+const KINDS = {
+  DEPOSIT: { label: 'Depósito', bg: '#E2F5EA', ink: '#00662F' },
+  RESERVE: { label: 'Reservado para una orden', bg: '#E8F0FD', ink: '#1D4FA0' },
+  TRADE_PAID: { label: 'Pagaste una compra', bg: '#FDECEE', ink: '#A8182A' },
+  TRADE_RECEIVED: { label: 'Recibiste VIB', bg: '#E2F5EA', ink: '#00662F' }
+};
+
+const BIDS = [
+  { price: 10000, volume: 30 },
+  { price: 9900, volume: 15 },
+  { price: 9800, volume: 22 },
+  { price: 9650, volume: 10 }
+];
+const ASKS = [
+  { price: 10100, volume: 5 },
+  { price: 10200, volume: 12 },
+  { price: 10350, volume: 20 },
+  { price: 10500, volume: 8 }
+];
+
+const CASE_HINTS = {
+  BUY_LIMIT: 'Compra VIB pagando como máximo el precio que elijas.',
+  SELL_LIMIT: 'Vende VIB cobrando como mínimo el precio que elijas.',
+  BUY_MARKET: 'Gasta un monto en BRL y compra al mejor precio disponible.',
+  SELL_MARKET: 'Vende VIB ya, al mejor precio disponible.'
+};
+
+function parseDec(text, decimals) {
+  const t = String(text || '').trim();
+  const re = decimals ? new RegExp('^\\d+(\\.\\d{1,' + decimals + '})?$') : /^\d+$/;
+  if (!re.test(t)) return NaN;
+  const parts = t.split('.');
+  const n = Number(parts[0] + (parts[1] || '').padEnd(decimals, '0'));
+  return n > 0 ? n : NaN;
+}
+
+function fmt(units, decimals) {
+  const s = String(Math.abs(units)).padStart(decimals + 1, '0');
+  const whole = decimals ? s.slice(0, -decimals) : s;
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decimals ? grouped + '.' + s.slice(-decimals) : grouped;
+}
+
+const brl = (cents) => 'R$ ' + fmt(cents, 2);
+const vib = (units) => fmt(units, 0) + ' VIB';
+const money = (cur, units) => (cur === 'BRL' ? brl(units) : vib(units));
+const sideStyle = (on, color) =>
+  'flex:1;min-height:48px;border:0;border-radius:10px;font-weight:800;font-size:16px;' +
+  (on ? 'background:' + color + ';color:#fff;' : 'background:transparent;color:#5F6288;');
+const typeStyle = (on) =>
+  'min-height:40px;padding:0 22px;border:0;border-radius:9px;font-weight:700;font-size:15px;' +
+  (on ? 'background:#fff;color:' + INK + ';box-shadow:0 1px 3px rgba(45,50,119,0.2);' : 'background:transparent;color:#5F6288;');
+const note = (tone) =>
+  'border-radius:12px;padding:12px 14px;font-weight:600;font-size:14px;' +
+  (tone === 'error' ? 'background:#FDECEE;color:#A8182A;' : 'background:#E2F5EA;color:#00662F;');
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      name: 'luna_vib', nameDraft: 'luna_vib',
+      side: 'BUY', type: 'LIMIT', limit: '90.00', qty: '10', amount: '500.00',
+      msg: '', msgTone: 'ok',
+      depAmount: '150.00', depMsg: '', depTone: 'ok',
+      bal: { brlA: 10000, brlR: 90000, vibA: 5, vibR: 0 },
+      seq: 1,
+      movements: [
+        { id: 'm5', kind: 'RESERVE', cur: 'BRL', amt: 90000, sign: '-', time: 'Hoy · 14:02' },
+        { id: 'm4', kind: 'TRADE_RECEIVED', cur: 'VIB', amt: 5, sign: '+', time: 'Ayer · 18:40' },
+        { id: 'm3', kind: 'TRADE_PAID', cur: 'BRL', amt: 50000, sign: '-', time: 'Ayer · 18:40' },
+        { id: 'm1', kind: 'DEPOSIT', cur: 'BRL', amt: 150000, sign: '+', time: 'Ayer · 18:31' }
+      ]
+    };
+  }
+
+  currentCase() { return { side: this.state.side, type: this.state.type }; }
+
+  buildOrder() {
+    const s = this.state;
+    const c = this.currentCase();
+    const buy = c.side === 'BUY';
+    const limit = c.type === 'LIMIT';
+    const price = limit ? parseDec(s.limit, 2) : null;
+    const qty = limit || !buy ? parseDec(s.qty, 0) : null;
+    const amount = !limit && buy ? parseDec(s.amount, 2) : null;
+    if (limit && !(price > 0)) return { error: 'Revisa el precio: máximo 2 decimales y mayor que 0.' };
+    if ((limit || !buy) && !(qty > 0)) return { error: 'La cantidad debe ser un número entero de VIB.' };
+    if (!limit && buy && !(amount > 0)) return { error: 'Revisa el monto: máximo 2 decimales y mayor que 0.' };
+    if (!buy) return { cur: 'VIB', held: qty };
+    return { cur: 'BRL', held: limit ? price * qty : amount };
+  }
+
+  placeOrder() {
+    const s = this.state;
+    const order = this.buildOrder();
+    if (order.error) return this.setState({ msg: order.error, msgTone: 'error' });
+    const have = order.cur === 'BRL' ? s.bal.brlA : s.bal.vibA;
+    if (order.held > have) return this.setState({ msg: 'Saldo insuficiente: la orden sería rechazada.', msgTone: 'error' });
+
+    const bal = Object.assign({}, s.bal);
+    if (order.cur === 'BRL') { bal.brlA -= order.held; bal.brlR += order.held; } else { bal.vibA -= order.held; bal.vibR += order.held; }
+    const movement = { id: 'm' + (100 + s.seq), kind: 'RESERVE', cur: order.cur, amt: order.held, sign: '-', time: 'Ahora' };
+    this.setState({
+      bal, seq: s.seq + 1, movements: [movement].concat(s.movements),
+      msg: 'Orden enviada. Reservamos ' + money(order.cur, order.held) + '.', msgTone: 'ok'
+    });
+  }
+
+  makeDeposit() {
+    const s = this.state;
+    const amt = parseDec(s.depAmount, 2);
+    if (!(amt > 0)) return this.setState({ depMsg: 'Escribe un monto mayor que 0, con máximo 2 decimales.', depTone: 'error' });
+    const bal = Object.assign({}, s.bal, { brlA: s.bal.brlA + amt });
+    const movement = { id: 'm' + (100 + s.seq), kind: 'DEPOSIT', cur: 'BRL', amt, sign: '+', time: 'Ahora' };
+    this.setState({
+      bal, seq: s.seq + 1, movements: [movement].concat(s.movements),
+      depMsg: 'Listo, cargaste ' + brl(amt) + '.', depTone: 'ok'
+    });
+  }
+
+  setName(value) {
+    const draft = value.trim();
+    this.setState({ nameDraft: value, name: draft || this.state.name });
+  }
+
+  buildDepth(rows) {
+    const top = Math.max.apply(null, rows.map((r) => r.volume));
+    return rows.map((r) => ({
+      price: brl(r.price), volume: r.volume, pct: Math.round((r.volume / top) * 100) + '%'
+    }));
+  }
+
+  buildMovements() {
+    return this.state.movements.slice(0, 5).map((m) => {
+      const k = KINDS[m.kind];
+      return {
+        cur: m.cur, label: k.label, chipBg: k.bg, chipInk: k.ink, time: m.time,
+        amount: m.sign + money(m.cur, m.amt), tone: m.sign === '+' ? '#00662F' : INK
+      };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const c = this.currentCase();
+    const buy = c.side === 'BUY';
+    const limit = c.type === 'LIMIT';
+    const bal = s.bal;
+
+    return {
+      name: s.name, initial: s.name.charAt(0).toUpperCase(),
+      nameDraft: s.nameDraft,
+      setName: (e) => this.setName(e.target.value),
+      bestBid: brl(BEST_BID), bestAsk: brl(BEST_ASK),
+
+      chooseBuy: () => this.setState({ side: 'BUY', msg: '' }),
+      chooseSell: () => this.setState({ side: 'SELL', msg: '' }),
+      chooseLimit: () => this.setState({ type: 'LIMIT', msg: '' }),
+      chooseMarket: () => this.setState({ type: 'MARKET', msg: '' }),
+      tabBuyStyle: sideStyle(buy, GREEN), tabSellStyle: sideStyle(!buy, RED),
+      tabLimitStyle: typeStyle(limit), tabMarketStyle: typeStyle(!limit),
+      caseHint: CASE_HINTS[s.side + '_' + s.type],
+      asks: this.buildDepth(ASKS), bids: this.buildDepth(BIDS),
+      showLimit: limit, showQty: limit || !buy, showAmount: !limit && buy,
+      limitLabel: buy ? 'Pagar como máximo (por VIB)' : 'Cobrar como mínimo (por VIB)',
+      limitValue: s.limit, qtyValue: s.qty, amountValue: s.amount,
+      setLimit: (e) => this.setState({ limit: e.target.value }),
+      setQty: (e) => this.setState({ qty: e.target.value }),
+      setAmount: (e) => this.setState({ amount: e.target.value }),
+      ctaLabel: buy ? 'Confirmar compra' : 'Confirmar venta',
+      ctaStyle: 'height:52px;border:0;border-radius:14px;color:#fff;font-weight:800;font-size:17px;background:' + (buy ? GREEN : RED),
+      placeOrder: () => this.placeOrder(),
+      hasMsg: s.msg !== '', msg: s.msg, msgStyle: note(s.msgTone),
+
+      brlTotal: brl(bal.brlA + bal.brlR), brlRes: brl(bal.brlR),
+      vibTotal: vib(bal.vibA + bal.vibR), vibRes: vib(bal.vibR),
+      depositValue: s.depAmount,
+      setDeposit: (e) => this.setState({ depAmount: e.target.value }),
+      makeDeposit: () => this.makeDeposit(),
+      hasDepMsg: s.depMsg !== '', depMsg: s.depMsg, depMsgStyle: note(s.depTone),
+      movements: this.buildMovements()
+    };
+  }
+}
+</script>
+</body>
+</html>
