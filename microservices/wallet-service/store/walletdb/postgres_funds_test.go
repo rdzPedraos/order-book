@@ -1,141 +1,104 @@
 package walletdb
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/rdzpedraos/order-book/microservices/wallet-service/models"
-	"github.com/rdzpedraos/order-book/shared/money"
 )
 
-func expectNoStoredResult(mocks sqlmockLike, operation models.FundsOperation) {
-	mocks.ExpectQuery(findResult).WithArgs(operation.Type, operation.MessageID).WillReturnRows(sqlmock.NewRows([]string{"result"}))
+type encodedBatch struct {
+	operations []models.FundsOperation
 }
 
-type sqlmockLike interface {
-	ExpectQuery(expectedSQL string) *sqlmock.ExpectedQuery
+func (batch encodedBatch) Match(value driver.Value) bool {
+	encoded, isString := value.(string)
+	if !isString {
+		return false
+	}
+
+	var rows []fundsRow
+	if err := json.Unmarshal([]byte(encoded), &rows); err != nil || len(rows) != len(batch.operations) {
+		return false
+	}
+
+	for position, row := range rows {
+		if !isRowOf(row, position, batch.operations[position]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isRowOf(row fundsRow, position int, operation models.FundsOperation) bool {
+	return row.Position == position && row.ID != uuid.Nil && !row.CreatedAt.IsZero() &&
+		row.Type == operation.Type && row.MessageID == operation.MessageID && row.OrderID == operation.OrderID &&
+		row.UserID == operation.UserID && row.Currency == operation.Currency && row.Amount == operation.Amount
+}
+
+func newResultRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"operation_position", "operation_result"})
 }
 
 func TestPostgresApplyFundsBatch(t *testing.T) {
 	reserve := fundsOperation(models.MovementReserve, "user-a", 800)
 	release := fundsOperation(models.MovementRelease, "user-a", 500)
 
-	t.Run("new reservation moves funds and is recorded", func(t *testing.T) {
+	t.Run("a batch is one query and its results follow the batch order", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, reserve)
-		mocks.SQL.ExpectExec(reserveFunds).WithArgs("user-a", money.BRL, int64(800)).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectCommit()
+		mocks.SQL.ExpectQuery(applyFundsBatch).WithArgs(encodedBatch{[]models.FundsOperation{reserve, release}}).
+			WillReturnRows(newResultRows().AddRow(0, "OK").AddRow(1, "release_exceeds_reservation"))
 
-		results, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve})
+		results, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve, release})
 		c.NoError(err)
-		c.Equal(models.ResultOK, results[0].Result)
+		c.Equal([]models.FundsResult{
+			{MessageID: reserve.MessageID, Type: models.MovementReserve, Result: models.ResultOK},
+			{MessageID: release.MessageID, Type: models.MovementRelease, Result: models.ResultReleaseExceedsReservation},
+		}, results)
 	})
 
-	t.Run("reservation without funds is recorded as rejected", func(t *testing.T) {
+	t.Run("database error is returned", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, reserve)
-		mocks.SQL.ExpectExec(reserveFunds).WillReturnResult(sqlmock.NewResult(0, 0))
-		mocks.SQL.ExpectExec(insertMovement).WithArgs(sqlmock.AnyArg(), "user-a", money.BRL, models.MovementReserve, int64(800),
-			reserve.OrderID, reserve.MessageID, models.ResultInsufficientFunds, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectCommit()
-
-		results, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve})
-		c.NoError(err)
-		c.Equal(models.ResultInsufficientFunds, results[0].Result)
-	})
-
-	t.Run("repeated message returns the stored result", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectQuery(findResult).WillReturnRows(sqlmock.NewRows([]string{"result"}).AddRow("insufficient_funds"))
-		mocks.SQL.ExpectCommit()
-
-		results, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve})
-		c.NoError(err)
-		c.Equal(models.ResultInsufficientFunds, results[0].Result)
-	})
-
-	t.Run("new release moves funds and is recorded", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, release)
-		mocks.SQL.ExpectExec(releaseFunds).WithArgs("user-a", money.BRL, int64(500)).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectCommit()
-
-		results, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{release})
-		c.NoError(err)
-		c.Equal(models.ResultOK, results[0].Result)
-	})
-
-	t.Run("release beyond the reserved balance is not recorded", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, release)
-		mocks.SQL.ExpectExec(releaseFunds).WillReturnResult(sqlmock.NewResult(0, 0))
-		mocks.SQL.ExpectCommit()
-
-		results, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{release})
-		c.NoError(err)
-		c.Equal(models.ResultReleaseExceedsReservation, results[0].Result)
-	})
-
-	t.Run("stored result that cannot be read is rolled back", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectQuery(findResult).WillReturnError(errors.New("connection reset"))
-		mocks.SQL.ExpectRollback()
+		connectionReset := errors.New("connection reset")
+		mocks.SQL.ExpectQuery(applyFundsBatch).WillReturnError(connectionReset)
 
 		_, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve})
-		c.ErrorContains(err, "find result")
+		c.ErrorIs(err, connectionReset)
 	})
 
-	t.Run("reservation that cannot be written is rolled back", func(t *testing.T) {
+	t.Run("fewer results than operations is an error", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, reserve)
-		mocks.SQL.ExpectExec(reserveFunds).WillReturnError(errors.New("connection reset"))
-		mocks.SQL.ExpectRollback()
+		mocks.SQL.ExpectQuery(applyFundsBatch).WillReturnRows(newResultRows().AddRow(0, "OK"))
+
+		_, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve, release})
+		c.ErrorIs(err, errUnexpectedFundsResults)
+	})
+
+	t.Run("a result out of the batch order is an error", func(t *testing.T) {
+		c := require.New(t)
+		ctx, mocks := newSQLMockContext(t)
+		mocks.SQL.ExpectQuery(applyFundsBatch).WillReturnRows(newResultRows().AddRow(1, "OK"))
 
 		_, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve})
-		c.ErrorContains(err, "reserve funds")
+		c.ErrorIs(err, errUnexpectedFundsResults)
 	})
 
-	t.Run("release that cannot be written is rolled back", func(t *testing.T) {
+	t.Run("result that cannot be read is an error", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, release)
-		mocks.SQL.ExpectExec(releaseFunds).WillReturnError(errors.New("connection reset"))
-		mocks.SQL.ExpectRollback()
+		mocks.SQL.ExpectQuery(applyFundsBatch).WillReturnRows(newResultRows().AddRow("first", "OK"))
 
-		_, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{release})
-		c.ErrorContains(err, "release funds")
-	})
-
-	t.Run("movement that cannot be written is rolled back", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		expectNoStoredResult(mocks.SQL, release)
-		mocks.SQL.ExpectExec(releaseFunds).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnError(errors.New("connection reset"))
-		mocks.SQL.ExpectRollback()
-
-		_, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{release})
-		c.ErrorContains(err, "insert movement")
+		_, err := postgres{}.applyFundsBatch(ctx, []models.FundsOperation{reserve})
+		c.ErrorContains(err, "scan funds result")
 	})
 }

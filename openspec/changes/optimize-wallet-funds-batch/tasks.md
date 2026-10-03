@@ -1,0 +1,10 @@
+# Tasks
+
+## 1. Función `apply_funds_batch`
+
+- [x] 1.1 Fijar el comportamiento actual antes de cambiarlo: agregar a `store/walletdb/store_integration_test.go` los dos casos de D5 (dos operaciones de la misma persona en un lote, donde la segunda ve el saldo de la primera, y un lote con una operación de `amount` 0 que falla sin aplicar ninguna) y verificar con `go test -tags integration ./microservices/wallet-service/store/...` que pasan contra la implementación actual, junto con los tests de «Reserva exitosa», «Reserva sin fondos», «Reserva repetida», «Liberación repetida», «Liberación excesiva» e «Invariante no negativo bajo concurrencia» (`wallet`)
+- [x] 1.2 Un solo viaje por lote, test-first: cambiar los tests de `postgres_funds_test.go` para que esperen un único `ExpectQuery(applyFundsBatch)` sin `ExpectBegin` (filas convertidas en resultados en el orden del lote, error de la base devuelto, menos filas que operaciones como error) y verlos fallar; implementar la migración `20261006000000_create_apply_funds_batch.go` registrada en `migrations.All()`, la constante `applyFundsBatch` y `postgres{}.applyFundsBatch`, que arma el JSON de D2 y llama a la función, y quitar `findResult`, `reserveFunds`, `releaseFunds` y las funciones que las usan; refactor en verde; verificar con `go test ./microservices/wallet-service/...`, con los tests de integración de 1.1 sin cambios, con cobertura ≥ 85 % en `store/walletdb` y con `gofmt` y `gocyclo -over 9` sin reportes
+
+## 2. Medición
+
+- [x] 2.1 Repetir las corridas de la línea base (D6) en minikube: reconstruir la imagen de WalletService con `eval $(minikube docker-env)`, reiniciar sus pods, esperar a que el engine se ponga al día, correr `tools/loadgen` con el escenario B a 1.000/s durante 30 s con 200 y con 5.000 personas, y sacar p50, p90 y p99 de `funds:batch` de los logs de `wallet-funds`; verificar contra la tabla de D6 que `funds:batch` baja en los tres percentiles y que el engine queda con p50 hasta el primer evento por debajo de 1 s

@@ -210,6 +210,31 @@ func TestApplyFundsBatchIntegration(t *testing.T) {
 		c.NoError(err)
 		c.Equal(models.Balance{UserID: userID, Currency: money.BRL, Available: 700, Reserved: 300}, balances[0])
 	})
+
+	t.Run("an operation sees the balance left by the earlier ones of its batch", func(t *testing.T) {
+		c := require.New(t)
+		userID := newUserID()
+		c.NoError(Deposit(ctx, deposit(userID, money.BRL, 1000)))
+		reserve, tooMuch := fundsOperation(models.MovementReserve, userID, 800), fundsOperation(models.MovementReserve, userID, 500)
+
+		results, err := ApplyFundsBatch(ctx, []models.FundsOperation{reserve, tooMuch})
+		c.NoError(err)
+		c.Equal(models.ResultOK, results[0].Result)
+		c.Equal(models.ResultInsufficientFunds, results[1].Result)
+		c.Equal(models.Balance{UserID: userID, Currency: money.BRL, Available: 200, Reserved: 800}, getBalancesOf(c, ctx, userID)[0])
+	})
+
+	t.Run("a batch that fails applies none of its operations", func(t *testing.T) {
+		c := require.New(t)
+		userID := newUserID()
+		c.NoError(Deposit(ctx, deposit(userID, money.BRL, 1000)))
+		reserve, invalid := fundsOperation(models.MovementReserve, userID, 800), fundsOperation(models.MovementReserve, userID, 0)
+
+		_, err := ApplyFundsBatch(ctx, []models.FundsOperation{reserve, invalid})
+		c.Error(err)
+		c.Equal(models.Balance{UserID: userID, Currency: money.BRL, Available: 1000}, getBalancesOf(c, ctx, userID)[0])
+		c.Equal(models.ResultOK, applyOne(c, ctx, reserve), "the failed batch left no stored result")
+	})
 }
 
 // Each goroutine runs its own operation at the same time against the same row.

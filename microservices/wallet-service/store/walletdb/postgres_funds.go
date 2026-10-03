@@ -2,129 +2,107 @@ package walletdb
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"gofr.dev/pkg/gofr"
-	gofrSQL "gofr.dev/pkg/gofr/datasource/sql"
 
 	"github.com/rdzpedraos/order-book/microservices/wallet-service/models"
+	"github.com/rdzpedraos/order-book/shared/money"
 )
 
-const findResult = `
-SELECT result FROM ledger WHERE type = $1 AND message_id = $2`
+// The rules live in apply_funds_batch (migration 20261006000000), so a batch
+// is one round trip, and one statement applies all its operations or none.
+const applyFundsBatch = `
+SELECT operation_position, operation_result FROM apply_funds_batch($1) ORDER BY operation_position`
 
-// Like takeAvailable, a short balance affects no row instead of going negative.
-const reserveFunds = `
-UPDATE balances SET available = available - $3, reserved = reserved + $3
-WHERE user_id = $1 AND currency = $2 AND available >= $3`
+var errUnexpectedFundsResults = errors.New("apply funds batch: the results do not match the operations")
 
-const releaseFunds = `
-UPDATE balances SET reserved = reserved - $3, available = available + $3
-WHERE user_id = $1 AND currency = $2 AND reserved >= $3`
+// One element of the batch apply_funds_batch reads. The movement id and date
+// are made here, like those of every other movement, so the ledger stays in
+// creation order by id.
+type fundsRow struct {
+	Position  int                 `json:"position"`
+	ID        uuid.UUID           `json:"id"`
+	Type      models.MovementType `json:"type"`
+	MessageID uuid.UUID           `json:"message_id"`
+	OrderID   uuid.UUID           `json:"order_id"`
+	UserID    string              `json:"user_id"`
+	Currency  money.Currency      `json:"currency"`
+	Amount    int64               `json:"amount,string"`
+	CreatedAt time.Time           `json:"created_at"`
+}
 
 func (postgres) applyFundsBatch(ctx *gofr.Context, operations []models.FundsOperation) ([]models.FundsResult, error) {
-	results := make([]models.FundsResult, 0, len(operations))
-
-	err := runInTransaction(ctx, func(tx *gofrSQL.Tx) error {
-		for _, operation := range operations {
-			result, err := applyFundsOperation(ctx, tx, operation)
-			if err != nil {
-				return err
-			}
-
-			results = append(results, models.FundsResult{MessageID: operation.MessageID, Type: operation.Type, Result: result})
-		}
-
-		return nil
-	})
+	encodedBatch, err := formatFundsBatch(operations)
 	if err != nil {
 		return nil, err
 	}
 
+	rows, err := ctx.SQL.QueryContext(ctx, applyFundsBatch, encodedBatch)
+	if err != nil {
+		return nil, fmt.Errorf("apply funds batch: %w", err)
+	}
+	defer rows.Close()
+
+	return listFundsResults(rows, operations)
+}
+
+func formatFundsBatch(operations []models.FundsOperation) (string, error) {
+	batch := make([]fundsRow, 0, len(operations))
+
+	for position, operation := range operations {
+		movementID, err := uuid.NewV7()
+		if err != nil {
+			return "", fmt.Errorf("generate movement id: %w", err)
+		}
+
+		batch = append(batch, fundsRow{
+			Position: position, ID: movementID, Type: operation.Type, MessageID: operation.MessageID,
+			OrderID: operation.OrderID, UserID: operation.UserID, Currency: operation.Currency,
+			Amount: operation.Amount, CreatedAt: time.Now().UTC(),
+		})
+	}
+
+	encodedBatch, err := json.Marshal(batch)
+	if err != nil {
+		return "", fmt.Errorf("encode funds batch: %w", err)
+	}
+
+	return string(encodedBatch), nil
+}
+
+func listFundsResults(rows *sql.Rows, operations []models.FundsOperation) ([]models.FundsResult, error) {
+	results := make([]models.FundsResult, 0, len(operations))
+
+	for rows.Next() {
+		var (
+			position int
+			result   models.Result
+		)
+
+		if err := rows.Scan(&position, &result); err != nil {
+			return nil, fmt.Errorf("scan funds result: %w", err)
+		}
+
+		if position != len(results) || position >= len(operations) {
+			return nil, errUnexpectedFundsResults
+		}
+
+		operation := operations[position]
+		results = append(results, models.FundsResult{MessageID: operation.MessageID, Type: operation.Type, Result: result})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("apply funds batch: %w", err)
+	}
+
+	if len(results) != len(operations) {
+		return nil, errUnexpectedFundsResults
+	}
+
 	return results, nil
-}
-
-func applyFundsOperation(ctx *gofr.Context, tx *gofrSQL.Tx, operation models.FundsOperation) (models.Result, error) {
-	stored, err := findStoredResult(ctx, tx, operation)
-	if err != nil || stored != "" {
-		return stored, err
-	}
-
-	if operation.Type == models.MovementReserve {
-		return reserve(ctx, tx, operation)
-	}
-
-	return release(ctx, tx, operation)
-}
-
-// Empty when the message was never applied.
-func findStoredResult(ctx *gofr.Context, tx *gofrSQL.Tx, operation models.FundsOperation) (models.Result, error) {
-	var stored models.Result
-
-	err := tx.QueryRowContext(ctx, findResult, operation.Type, operation.MessageID).Scan(&stored)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("find result: %w", err)
-	}
-
-	return stored, nil
-}
-
-// A rejected reservation is recorded too, so a repeated message gets the same
-// answer even if the person deposited in between.
-func reserve(ctx *gofr.Context, tx *gofrSQL.Tx, operation models.FundsOperation) (models.Result, error) {
-	moved, err := updateBalance(ctx, tx, reserveFunds, operation)
-	if err != nil {
-		return "", fmt.Errorf("reserve funds: %w", err)
-	}
-
-	result := models.ResultOK
-	if !moved {
-		result = models.ResultInsufficientFunds
-	}
-
-	return result, insertFundsMovement(ctx, tx, operation, result)
-}
-
-func release(ctx *gofr.Context, tx *gofrSQL.Tx, operation models.FundsOperation) (models.Result, error) {
-	moved, err := updateBalance(ctx, tx, releaseFunds, operation)
-	if err != nil {
-		return "", fmt.Errorf("release funds: %w", err)
-	}
-
-	if !moved {
-		return models.ResultReleaseExceedsReservation, nil
-	}
-
-	return models.ResultOK, insertFundsMovement(ctx, tx, operation, models.ResultOK)
-}
-
-func updateBalance(ctx *gofr.Context, tx *gofrSQL.Tx, query string, operation models.FundsOperation) (bool, error) {
-	result, err := tx.ExecContext(ctx, query, operation.UserID, operation.Currency, operation.Amount)
-	if err != nil {
-		return false, err
-	}
-
-	rows, err := result.RowsAffected()
-
-	return rows > 0, err
-}
-
-func insertFundsMovement(ctx *gofr.Context, tx *gofrSQL.Tx, operation models.FundsOperation, result models.Result) error {
-	movementID, err := uuid.NewV7()
-	if err != nil {
-		return fmt.Errorf("generate movement id: %w", err)
-	}
-
-	return insertMovementIn(ctx, tx, models.Movement{
-		ID: movementID, UserID: operation.UserID, Currency: operation.Currency, Type: operation.Type,
-		Amount: operation.Amount, OrderID: &operation.OrderID, MessageID: &operation.MessageID,
-		Result: result, CreatedAt: time.Now().UTC(),
-	})
 }
