@@ -7,6 +7,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -22,25 +23,26 @@ const (
 	fundedVIB = "1000000"
 )
 
-// OrdersURL and WalletURL are the base URLs of OrderService and WalletService;
-// Host, when set, is the Host header the ingress routes by. EventWait is how
-// long the run waits, after sending, for the last engine events.
+// EventWait is how long the run waits, after sending, for the last engine
+// events. Progress gets the phases of the run and a line every ProgressEvery.
 type Config struct {
-	OrdersURL string
-	WalletURL string
-	Host      string
-	Book      string
-	People    []string
-	Workers   int
-	Duration  time.Duration
-	EventWait time.Duration
-	Schedule  pace.Schedule
-	Generator *workload.Generator
+	OrdersURL     string
+	WalletURL     string
+	Book          string
+	People        []string
+	Workers       int
+	Duration      time.Duration
+	EventWait     time.Duration
+	Schedule      pace.Schedule
+	Generator     *workload.Generator
+	Progress      io.Writer
+	ProgressEvery time.Duration
 }
 
 // Acceptance is the latency until the API answered; Engine until the
 // engine's first event about the order. MissingEvents are accepted orders
-// whose event never arrived within EventWait.
+// whose event never arrived within EventWait. EngineRate is how many orders
+// per second the engine processed.
 type Report struct {
 	Sent          int
 	Accepted      int
@@ -49,6 +51,7 @@ type Report struct {
 	Acceptance    stats.Summary
 	Engine        stats.Summary
 	MissingEvents int
+	EngineRate    float64
 }
 
 func Run(ctx context.Context, config Config, tracker *Tracker) (*Report, error) {
@@ -57,17 +60,31 @@ func Run(ctx context.Context, config Config, tracker *Tracker) (*Report, error) 
 		return nil, err
 	}
 
+	fmt.Fprintf(config.Progress, "funding %d people\n", len(config.People))
 	if err := fundPeople(ctx, api, config.People); err != nil {
 		return nil, err
 	}
 
+	fmt.Fprintf(config.Progress, "sending for %s\n", config.Duration)
+	stopProgress := startProgress(ctx, config.Progress, config.ProgressEvery, tracker)
+	sendStartedAt := time.Now()
 	report, acceptance := sendRequests(ctx, api, config, tracker)
+
+	fmt.Fprintf(config.Progress, "waiting up to %s for the last engine events\n", config.EventWait)
 	waitForEvents(ctx, tracker, config.EventWait)
+	stopProgress()
 
 	latencies, missing := tracker.getLatencies()
 	report.Acceptance, report.Engine, report.MissingEvents = stats.Summarize(acceptance), stats.Summarize(latencies), missing
+	report.EngineRate = tracker.getEngineRate(sendStartedAt)
 
 	return report, nil
+}
+
+// A backlog shows as seconds until the event that grow with the run, so an
+// engine that keeps up answers every order, and 99 % of them within a second.
+func (r Report) IsEngineKeepingUp() bool {
+	return r.Engine.Count > 0 && r.MissingEvents == 0 && r.Engine.P99 < time.Second
 }
 
 func fundPeople(ctx context.Context, api *client, people []string) error {
@@ -96,7 +113,7 @@ func sendRequests(ctx context.Context, api *client, config Config, tracker *Trac
 
 	var workers sync.WaitGroup
 	for range config.Workers {
-		workers.Go(func() { sendEach(ctx, api, config.Generator, tracker, requests, outcomes) })
+		workers.Go(func() { sendEach(ctx, api, tracker, requests, outcomes) })
 	}
 
 	go func() {
@@ -148,24 +165,18 @@ func pushDue(ctx context.Context, config Config, requests chan<- workload.Reques
 	}
 }
 
-func sendEach(ctx context.Context, api *client, generator *workload.Generator, tracker *Tracker,
-	requests <-chan workload.Request, outcomes chan<- outcome,
-) {
+func sendEach(ctx context.Context, api *client, tracker *Tracker, requests <-chan workload.Request, outcomes chan<- outcome) {
 	for request := range requests {
 		sentAt := time.Now()
 
-		orderID, err := api.send(ctx, request)
+		orderID, err := api.postOrder(ctx, request)
 		if err != nil {
 			outcomes <- outcome{failed: true}
 
 			continue
 		}
 
-		if request.Kind == workload.KindCreate {
-			tracker.AddSent(orderID, sentAt)
-			generator.AddOrder(request.UserID, orderID.String())
-		}
-
+		tracker.AddSent(orderID, sentAt)
 		outcomes <- outcome{latency: time.Since(sentAt)}
 	}
 }

@@ -1,20 +1,21 @@
-// Command loadgen sends a load profile to the API at a fixed rate and
-// reports how many orders it sent, how long the API took to accept them and
-// how long until the engine published its first event about each one (design
-// D4 of 06-container-infrastructure). It runs inside the cluster, where it
-// reaches the services and Redpanda by their names:
+// Command loadgen answers whether the deployed stack keeps up with a rate of
+// orders: it sends orders to the API at that rate, measures how long the API
+// takes to accept each one and how long until the engine publishes its first
+// event about it, and ends with a verdict (design D4 of
+// 06-container-infrastructure). It runs inside the cluster, where it reaches
+// the services and Redpanda by their names:
 //
-//	loadgen -profile B -rate 5000 -duration 10m
+//	loadgen -rate 5000 -duration 10m
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
 	"github.com/rdzpedraos/order-book/shared/books"
@@ -26,15 +27,29 @@ import (
 	"github.com/rdzpedraos/order-book/tools/loadgen/workload"
 )
 
+// Where loadgen reaches the stack from inside the cluster, and the people
+// it funds and trades as.
+const (
+	ordersURL = "http://orderbook-order-api"
+	walletURL = "http://orderbook-wallet-api"
+	broker    = "redpanda:9093"
+	bookID    = "BRL-VIB"
+	people    = 5000
+	workers   = 200
+	progress  = 5 * time.Second
+)
+
+var errUnknownProfile = errors.New("unknown profile: use B (a fixed rate) or E (a burst)")
+
 type flags struct {
-	orders, wallet, host, brokers, book, profile string
-	rate, peak, people, workers                  int
-	duration, wait                               time.Duration
-	seed                                         uint64
+	profile        string
+	rate, peak     int
+	duration, wait time.Duration
 }
 
 func main() {
 	options := parseFlags()
+	printHeader(options)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -44,79 +59,86 @@ func main() {
 		log.Fatal(err)
 	}
 
-	printReport(options, report)
+	printReport(report)
 }
 
 func parseFlags() flags {
 	var options flags
 
-	flag.StringVar(&options.orders, "orders", "http://orderbook-order-api", "OrderService base URL")
-	flag.StringVar(&options.wallet, "wallet", "http://orderbook-wallet-api", "WalletService base URL")
-	flag.StringVar(&options.host, "host", "", "Host header, to go through the ingress")
-	flag.StringVar(&options.brokers, "brokers", "redpanda:9093", "Redpanda brokers, comma separated")
-	flag.StringVar(&options.book, "book", "BRL-VIB", "book to trade")
-	flag.StringVar(&options.profile, "profile", "B", "load profile: A, B, C, D or E")
-	flag.IntVar(&options.rate, "rate", 1000, "requests per second (the base rate of E)")
-	flag.IntVar(&options.peak, "peak", 10000, "requests per second at the peak of E")
-	flag.IntVar(&options.people, "people", 200, "people trading, funded at the start")
-	flag.IntVar(&options.workers, "workers", 200, "requests in flight at once")
+	flag.StringVar(&options.profile, "profile", "B", "load profile: B at a fixed rate, or E in a burst")
+	flag.IntVar(&options.rate, "rate", 1000, "orders per second (the base rate of E)")
+	flag.IntVar(&options.peak, "peak", 10000, "orders per second at the peak of E")
 	flag.DurationVar(&options.duration, "duration", time.Minute, "how long to send")
 	flag.DurationVar(&options.wait, "wait", 30*time.Second, "how long to wait for the last engine events")
-	flag.Uint64Var(&options.seed, "seed", 1, "seed of the requests")
 	flag.Parse()
 
 	return options
 }
 
 func run(ctx context.Context, options flags) (*driver.Report, error) {
-	book, err := books.Normalize(options.book)
+	book, err := books.Normalize(bookID)
 	if err != nil {
 		return nil, err
 	}
 
-	generator, err := workload.NewGenerator(options.profile, options.people, options.seed)
+	schedule, err := buildSchedule(options)
 	if err != nil {
 		return nil, err
 	}
 
 	tracker := driver.NewTracker(time.Now())
 
-	err = consumer.StartPartition(ctx, strings.Split(options.brokers, ","), events.TopicOrderEvents, book.Partition,
-		1000, logger{}, tracker.ApplyRecords)
+	err = consumer.StartPartition(ctx, []string{broker}, events.TopicOrderEvents, book.Partition, 1000, logger{}, tracker.ApplyRecords)
 	if err != nil {
 		return nil, err
 	}
 
 	return driver.Run(ctx, driver.Config{
-		OrdersURL: options.orders, WalletURL: options.wallet, Host: options.host, Book: book.ID,
-		People: workload.ListPeople(options.people), Workers: options.workers,
-		Duration: options.duration, EventWait: options.wait,
-		Schedule: buildSchedule(options), Generator: generator,
+		OrdersURL: ordersURL, WalletURL: walletURL, Book: book.ID, People: workload.ListPeople(people), Workers: workers,
+		Duration: options.duration, EventWait: options.wait, Schedule: schedule, Generator: workload.NewGenerator(people, 1),
+		Progress: os.Stdout, ProgressEvery: progress,
 	}, tracker)
 }
 
-func buildSchedule(options flags) pace.Schedule {
-	if options.profile == "E" {
-		return pace.NewBurst(options.rate, options.peak, options.duration)
+func buildSchedule(options flags) (pace.Schedule, error) {
+	switch options.profile {
+	case "B":
+		return pace.NewConstant(options.rate), nil
+	case "E":
+		return pace.NewBurst(options.rate, options.peak, options.duration), nil
+	default:
+		return nil, errUnknownProfile
 	}
-
-	return pace.NewConstant(options.rate)
 }
 
-func printReport(options flags, report *driver.Report) {
+func printHeader(options flags) {
+	if options.profile == "E" {
+		fmt.Printf("profile E, %d/s with a peak of %d/s, for %s\n", options.rate, options.peak, options.duration)
+
+		return
+	}
+
 	fmt.Printf("profile %s, %d/s for %s\n", options.profile, options.rate, options.duration)
-	fmt.Printf("sent %d, accepted %d, failed %d, in %s: %.0f accepted/s\n",
-		report.Sent, report.Accepted, report.Failed, report.Elapsed.Round(time.Millisecond),
-		float64(report.Accepted)/report.Elapsed.Seconds())
-	printSummary("API accepted", report.Acceptance)
+}
+
+func printReport(report *driver.Report) {
+	verdict := "falls behind"
+	if report.IsEngineKeepingUp() {
+		verdict = "keeps up"
+	}
+
+	fmt.Printf("sent %d, accepted %d, failed %d: %.0f accepted/s\n",
+		report.Sent, report.Accepted, report.Failed, float64(report.Accepted)/report.Elapsed.Seconds())
+	printSummary("API answer", report.Acceptance)
 	printSummary("engine event", report.Engine)
 	fmt.Printf("orders without their engine event: %d\n", report.MissingEvents)
+	fmt.Printf("verdict: the engine %s, it processed %.0f orders/s\n", verdict, report.EngineRate)
 }
 
 func printSummary(name string, summary stats.Summary) {
-	fmt.Printf("%-13s n=%d p50=%s p90=%s p99=%s p99.9=%s max=%s\n", name, summary.Count,
-		summary.P50.Round(time.Microsecond*100), summary.P90.Round(time.Microsecond*100),
-		summary.P99.Round(time.Microsecond*100), summary.P999.Round(time.Microsecond*100), summary.Max.Round(time.Millisecond))
+	fmt.Printf("%-13s p50=%s p90=%s p99=%s p99.9=%s max=%s\n", name, summary.P50.Round(time.Millisecond),
+		summary.P90.Round(time.Millisecond), summary.P99.Round(time.Millisecond),
+		summary.P999.Round(time.Millisecond), summary.Max.Round(time.Millisecond))
 }
 
 type logger struct{}

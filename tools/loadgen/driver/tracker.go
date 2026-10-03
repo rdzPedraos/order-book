@@ -18,9 +18,10 @@ type Tracker struct {
 	startedAt time.Time
 	now       func() time.Time
 
-	lock    sync.Mutex
-	sentAt  map[uuid.UUID]time.Time
-	eventAt map[uuid.UUID]time.Time
+	lock        sync.Mutex
+	sentAt      map[uuid.UUID]time.Time
+	eventAt     map[uuid.UUID]time.Time
+	lastEventAt time.Time
 }
 
 // Events created before startedAt belong to earlier runs and are left out.
@@ -48,7 +49,7 @@ func (t *Tracker) ApplyRecords(_ context.Context, records []consumer.Record) err
 	for _, record := range records {
 		orderID, ok := t.getFirstEventOrder(record.Message)
 		if ok {
-			t.eventAt[orderID] = readAt
+			t.eventAt[orderID], t.lastEventAt = readAt, readAt
 		}
 	}
 
@@ -71,6 +72,29 @@ func (t *Tracker) getFirstEventOrder(message events.Message) (uuid.UUID, bool) {
 	_, seen := t.eventAt[header.OrderID]
 
 	return header.OrderID, !seen
+}
+
+// Orders with their event per second, from since to the last event read.
+// When the engine falls behind, this is how fast it drains its backlog.
+func (t *Tracker) getEngineRate(since time.Time) float64 {
+	latencies, _ := t.getLatencies()
+
+	t.lock.Lock()
+	elapsed := t.lastEventAt.Sub(since)
+	t.lock.Unlock()
+
+	if len(latencies) == 0 || elapsed <= 0 {
+		return 0
+	}
+
+	return float64(len(latencies)) / elapsed.Seconds()
+}
+
+func (t *Tracker) countOrders() counts {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	return counts{accepted: len(t.sentAt), processed: len(t.eventAt)}
 }
 
 // Answers the latencies of the orders whose event arrived, and how many are

@@ -82,6 +82,30 @@ func TestTracker(t *testing.T) {
 		c.Empty(tracker.eventAt)
 	})
 
+	t.Run("the engine rate counts the orders with their event, up to the last event", func(t *testing.T) {
+		c := require.New(t)
+		tracker := newClockTracker(runStart.Add(2 * time.Second))
+		first, second := uuid.New(), uuid.New()
+		tracker.AddSent(first, runStart)
+		tracker.AddSent(second, runStart.Add(time.Second))
+		tracker.AddSent(uuid.New(), runStart.Add(time.Second))
+
+		c.NoError(tracker.ApplyRecords(context.Background(), []consumer.Record{
+			eventRecord(c, events.RouteOrderAccepted, first, runStart),
+			eventRecord(c, events.RouteOrderAccepted, second, runStart),
+		}))
+
+		c.InDelta(1.0, tracker.getEngineRate(runStart), 0.0001)
+	})
+
+	t.Run("without events the engine rate is zero", func(t *testing.T) {
+		c := require.New(t)
+		tracker := newClockTracker(runStart)
+		tracker.AddSent(uuid.New(), runStart)
+
+		c.Zero(tracker.getEngineRate(runStart))
+	})
+
 	t.Run("an order without its event yet is missing", func(t *testing.T) {
 		c := require.New(t)
 		tracker := newClockTracker(runStart)

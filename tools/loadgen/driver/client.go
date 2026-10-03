@@ -19,7 +19,6 @@ type client struct {
 	http      *http.Client
 	ordersURL string
 	walletURL string
-	host      string
 	book      books.Book
 }
 
@@ -40,8 +39,7 @@ func newClient(config Config) (*client, error) {
 	transport := &http.Transport{MaxIdleConns: config.Workers, MaxIdleConnsPerHost: config.Workers}
 
 	return &client{
-		http: &http.Client{Transport: transport}, ordersURL: config.OrdersURL, walletURL: config.WalletURL,
-		host: config.Host, book: book,
+		http: &http.Client{Transport: transport}, ordersURL: config.OrdersURL, walletURL: config.WalletURL, book: book,
 	}, nil
 }
 
@@ -53,14 +51,8 @@ func (c *client) postDeposit(ctx context.Context, userID string, currency money.
 	return err
 }
 
-// Answers the order id the API gave the new order, or nothing for a cancellation.
-func (c *client) send(ctx context.Context, request workload.Request) (uuid.UUID, error) {
-	if request.Kind == workload.KindCancel {
-		_, err := c.post(ctx, c.ordersURL+"/orders/"+request.OrderID+"/close", request.UserID, nil)
-
-		return uuid.Nil, err
-	}
-
+// Answers the order id the API gave the new order.
+func (c *client) postOrder(ctx context.Context, request workload.Request) (uuid.UUID, error) {
 	answer, err := c.post(ctx, c.ordersURL+"/orders", request.UserID, c.buildOrderBody(request))
 	if err != nil {
 		return uuid.Nil, err
@@ -115,9 +107,6 @@ func (c *client) post(ctx context.Context, url, userID string, body any) ([]byte
 
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-User-ID", userID)
-	if c.host != "" {
-		request.Host = c.host
-	}
 
 	response, err := c.http.Do(request)
 	if err != nil {

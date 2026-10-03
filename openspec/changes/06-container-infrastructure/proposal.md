@@ -11,7 +11,7 @@ El requerimiento no funcional central del PRD es de 5.000 operaciones/s con recu
 ## Goals
 
 - `helm install` despliega el stack completo en un cluster (kind en local).
-- Medición de 5.000 órdenes/s sostenidas y de los escenarios A–E.
+- Medición de 5.000 órdenes/s sostenidas y de los escenarios B y E.
 - Prueba de caída de cada servicio sin pérdida ni descuadre.
 
 ## Non-Goals
@@ -23,7 +23,7 @@ El requerimiento no funcional central del PRD es de 5.000 operaciones/s con recu
 
 - Dockerfiles multi-stage por servicio.
 - `deploy/helm/orderbook`, con dependencias de Redpanda y PostgreSQL, ConfigMaps (tamaño de lote, registro de books) y probes de health/readiness.
-- `tools/loadgen` con los escenarios A–E.
+- `tools/loadgen` con los escenarios B y E.
 - Tests de punta a punta y de caída sobre el stack.
 - `docs/operations.md` y resultados en `docs/benchmark.md`.
 

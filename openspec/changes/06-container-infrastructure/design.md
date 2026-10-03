@@ -63,13 +63,12 @@ Los clientes ven una sola API, en un mismo host y puerto. Un ingress enruta por 
 
 ### D4. Load generator
 
-- **Herramienta:** `tools/loadgen` en Go, con un pool de personas pre-fondeadas. Genera tasas fijas (1k, 2,5k, 5k, 10k y 25k/s) y los perfiles:
-  - A: todo cruza;
-  - B: 90 % reposa;
-  - C: 50 % cancelaciones;
-  - D: book profundo;
-  - E: burst de 1k a 10k/s.
-- **Medición:** latencia de aceptación (`201`/`202`) y latencia hasta el evento final (consumiendo `orders.events`).
+- **Herramienta:** `tools/loadgen` en Go, con un pool de personas pre-fondeadas. Genera tasas fijas (1k, 2,5k, 5k, 10k y 25k/s) y dos perfiles:
+  - B: 90 % reposa, el de la carga sostenida de la spec;
+  - E: las órdenes de B en un burst de 1k a 10k/s, para ver un pico.
+
+  Se descartaron los perfiles «todo cruza», «50 % cancelaciones» y «book profundo»: la meta de 5.000/s se mide con B, y cada perfil extra suma código que hay que mantener y explicar.
+- **Medición:** latencia de aceptación (`201`/`202`) y latencia hasta el evento final (consumiendo `orders.events`). El reporte termina con un veredicto: el engine sigue el ritmo cuando todas las órdenes aceptadas tienen su evento y el p99 hasta el evento queda por debajo de 1 s; si no, se atrasa. En los dos casos dice cuántas órdenes/s procesó el engine.
 - **Alternativa descartada:** k6. Escribir en Go permite reutilizar `shared/eventlog` para medir de punta a punta.
 
 ### D5. Test de caída
