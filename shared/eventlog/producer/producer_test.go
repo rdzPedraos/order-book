@@ -240,3 +240,81 @@ func TestPublishWithoutConnection(t *testing.T) {
 
 	c.ErrorIs(Publish(context.Background(), newMessage(c, "BRL-VIB")), ErrNotConnected)
 }
+
+func TestPublishBatchIntegration(t *testing.T) {
+	t.Run("a batch lands in the partition of its book, in order", func(t *testing.T) {
+		c := require.New(t)
+		connect(t)
+		topic := createTopic(t)
+		batch := []events.Message{newMessageOn(c, topic, "BRL-VIB"), newMessageOn(c, topic, "BRL-VIB"), newMessageOn(c, topic, "BRL-VIB")}
+
+		published, err := PublishBatch(context.Background(), batch)
+		c.NoError(err)
+		c.Equal(3, published)
+
+		c.Equal([]uuid.UUID{batch[0].ID, batch[1].ID, batch[2].ID}, getMessageIDs(c, readTopic(c, topic, 3)))
+	})
+
+	t.Run("an empty batch publishes nothing", func(t *testing.T) {
+		c := require.New(t)
+		connect(t)
+
+		published, err := PublishBatch(context.Background(), nil)
+		c.NoError(err)
+		c.Zero(published)
+	})
+
+	t.Run("a log that does not answer confirms nothing", func(t *testing.T) {
+		c := require.New(t)
+		c.NoError(Connect([]string{"127.0.0.1:1"}))
+		t.Cleanup(Close)
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		published, err := PublishBatch(ctx, []events.Message{newMessageOn(c, "orders.events", "BRL-VIB")})
+		c.Error(err)
+		c.Zero(published)
+	})
+
+	t.Run("a message of an unknown book stops the batch before it", func(t *testing.T) {
+		c := require.New(t)
+		connect(t)
+		topic := createTopic(t)
+
+		published, err := PublishBatch(context.Background(), []events.Message{newMessageOn(c, topic, "BRL-VIB"), newMessageOn(c, topic, "BTC-USD")})
+		c.ErrorIs(err, books.ErrUnknownBook)
+		c.Zero(published)
+	})
+}
+
+func TestMockPublishBatch(t *testing.T) {
+	t.Run("a batch is recorded in order", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		batch := []events.Message{newMessage(c, "BRL-VIB"), newMessage(c, "BRL-VIB")}
+
+		published, err := PublishBatch(context.Background(), batch)
+		c.NoError(err)
+		c.Equal(2, published)
+		c.Equal(batch, mock.Messages)
+	})
+
+	t.Run("an unreachable log fails the whole batch", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.FailTimes = 1
+
+		published, err := PublishBatch(context.Background(), []events.Message{newMessage(c, "BRL-VIB")})
+		c.ErrorIs(err, ErrNotConnected)
+		c.Zero(published)
+		c.Empty(mock.Messages)
+	})
+
+	t.Run("without a connection", func(t *testing.T) {
+		c := require.New(t)
+
+		published, err := PublishBatch(context.Background(), []events.Message{newMessage(c, "BRL-VIB")})
+		c.ErrorIs(err, ErrNotConnected)
+		c.Zero(published)
+	})
+}

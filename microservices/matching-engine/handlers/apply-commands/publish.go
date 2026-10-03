@@ -11,26 +11,20 @@ import (
 
 const publishRetryDelay = 200 * time.Millisecond
 
-// Each event is retried until the log confirms it, in order, so no event of
-// the batch is lost or published out of order while the engine runs.
+// The batch's events go to the log together, so the batch waits for the log
+// once. What the log did not confirm is retried, from the first event it did
+// not confirm, until it does: no event is lost, reordered or written twice
+// while the engine runs.
 func publishEvents(ctx *gofr.Context, messages []events.Message) error {
-	for _, message := range messages {
-		if err := publishWithRetry(ctx, message); err != nil {
-			return err
-		}
-	}
+	for len(messages) > 0 {
+		published, err := producer.PublishBatch(ctx, messages)
+		messages = messages[published:]
 
-	return nil
-}
-
-func publishWithRetry(ctx *gofr.Context, message events.Message) error {
-	for {
-		err := producer.Publish(ctx, message)
 		if err == nil {
-			return nil
+			continue
 		}
 
-		ctx.Logger.Errorf("publishing %s %s, retrying: %v", message.Route, message.ID, err)
+		ctx.Logger.Errorf("publishing %d events, retrying: %v", len(messages), err)
 
 		select {
 		case <-ctx.Done():
@@ -38,4 +32,6 @@ func publishWithRetry(ctx *gofr.Context, message events.Message) error {
 		case <-time.After(publishRetryDelay):
 		}
 	}
+
+	return nil
 }

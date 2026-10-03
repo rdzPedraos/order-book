@@ -42,4 +42,22 @@ func (m *Mock) publish(_ context.Context, _ string, _ books.Book, message events
 	return nil
 }
 
+func (m *Mock) publishBatch(ctx context.Context, batch []routedMessage) (int, error) {
+	if m.Err != nil {
+		return 0, m.Err
+	}
+
+	if m.FailTimes > 0 {
+		m.FailTimes--
+
+		return 0, ErrNotConnected
+	}
+
+	for _, routed := range batch {
+		m.Messages = append(m.Messages, routed.message)
+	}
+
+	return len(batch), nil
+}
+
 func (m *Mock) close() {}

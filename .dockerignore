@@ -1,8 +1,8 @@
-# Each Dockerfile copies only go.mod, go.sum, shared/ and its own service.
+# Each Dockerfile copies only go.mod, go.sum, shared/ and its own service or tool.
 .git
 bin
 docs
 openspec
 deploy
-tools
-.env
+# Local settings may hold credentials, in any folder.
+**/.env
