@@ -31,6 +31,8 @@ spec:
               value: {{ $book }}
             - name: WALLET_FUNDS_URL
               value: http://{{ $.Release.Name }}-wallet-funds
+            - name: COMMAND_BATCH_SIZE
+              value: {{ $.Values.engine.batchSize | quote }}
           ports:
             - name: metrics
               containerPort: 2121

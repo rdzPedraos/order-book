@@ -6,6 +6,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 
 	"gofr.dev/pkg/gofr"
@@ -17,11 +18,18 @@ import (
 	"github.com/rdzpedraos/order-book/shared/eventlog/producer"
 )
 
-// Calibrated by the benchmark of phase 6.
-const maxBatch = 500
+// The most commands applied per batch when COMMAND_BATCH_SIZE is not set. A
+// batch is not waited for: the engine takes what is available up to the size,
+// so the size only matters while it is behind.
+const defaultBatchSize = "500"
 
 func main() {
 	app := gofr.New()
+
+	maxBatch, err := strconv.Atoi(app.Config.GetOrDefault("COMMAND_BATCH_SIZE", defaultBatchSize))
+	if err != nil || maxBatch < 1 {
+		app.Logger().Fatalf("COMMAND_BATCH_SIZE %q is not a positive number", app.Config.Get("COMMAND_BATCH_SIZE"))
+	}
 
 	book, err := books.Normalize(app.Config.Get("BOOK"))
 	if err != nil {

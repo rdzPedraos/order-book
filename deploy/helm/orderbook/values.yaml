@@ -85,6 +85,8 @@ resources:
   limits: { memory: 256Mi }
 
 engine:
+  # The most commands per batch; the engine takes what is available up to it.
+  batchSize: 2000
   storage: 1Gi
   resources:
     requests: { cpu: 500m, memory: 256Mi }
