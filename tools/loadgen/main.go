@@ -16,6 +16,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/rdzpedraos/order-book/shared/books"
@@ -51,12 +52,18 @@ func main() {
 	options := parseFlags()
 	printHeader(options)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// Deleting the pod sends SIGTERM: like Ctrl-C, it stops the run, which
+	// still prints what it measured until then.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	report, err := run(ctx, options)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if ctx.Err() != nil {
+		fmt.Println("stopped before the end: the report covers the run until then")
 	}
 
 	printReport(report)
