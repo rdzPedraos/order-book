@@ -50,29 +50,6 @@ func orderRows(orders ...models.Order) *sqlmock.Rows {
 	return rows
 }
 
-func TestPostgresInsertOrder(t *testing.T) {
-	t.Run("order columns are sent in order", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		order := storedOrder()
-
-		mocks.SQL.ExpectExec(insertOrder).WithArgs(order.ID, order.UserID, order.Book, order.Side, order.Type, order.Limit,
-			order.Amount, order.Quantity, order.FilledQuantity, order.FilledAmount, order.Status, order.Reason,
-			order.CreatedAt, order.UpdatedAt).
-			WillReturnResult(sqlmock.NewResult(0, 1))
-
-		c.NoError(postgres{}.insertOrder(ctx, order))
-	})
-
-	t.Run("database unavailable", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectExec(insertOrder).WillReturnError(errors.New("connection refused"))
-
-		c.ErrorContains(postgres{}.insertOrder(ctx, storedOrder()), "insert order")
-	})
-}
-
 func TestPostgresGetOrder(t *testing.T) {
 	t.Run("own order is read", func(t *testing.T) {
 		c := require.New(t)
@@ -144,89 +121,5 @@ func TestPostgresListOrders(t *testing.T) {
 
 		_, err := postgres{}.listOrders(ctx, query)
 		c.ErrorContains(err, "list orders")
-	})
-}
-
-func TestPostgresEngineEvents(t *testing.T) {
-	createdAt := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
-
-	t.Run("an accepted or rejected order is inserted or updated", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		order := storedOrder()
-		mocks.SQL.ExpectExec(insertOrUpdateOrder).WithArgs(order.ID, order.UserID, order.Book, order.Side, order.Type, order.Limit,
-			order.Amount, order.Quantity, order.FilledQuantity, order.FilledAmount, order.Status, order.Reason,
-			order.CreatedAt, order.UpdatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
-
-		c.NoError(postgres{}.insertOrUpdateOrder(ctx, order))
-	})
-
-	t.Run("a cancelled order", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		id, reason := uuid.New(), "no_liquidity"
-		mocks.SQL.ExpectExec(updateCancelledOrder).WithArgs(id, &reason, createdAt).WillReturnResult(sqlmock.NewResult(0, 1))
-
-		c.NoError(postgres{}.updateCancelledOrder(ctx, id, &reason, createdAt))
-	})
-
-	t.Run("a modified order", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		id := uuid.New()
-		mocks.SQL.ExpectExec(updateModifiedOrder).WithArgs(id, int64(9200), int64(2), createdAt).WillReturnResult(sqlmock.NewResult(0, 1))
-
-		c.NoError(postgres{}.updateModifiedOrder(ctx, id, 9200, 2, createdAt))
-	})
-
-	t.Run("an unavailable database", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectExec(insertOrUpdateOrder).WillReturnError(errors.New("connection refused"))
-		mocks.SQL.ExpectExec(updateCancelledOrder).WillReturnError(errors.New("connection refused"))
-		mocks.SQL.ExpectExec(updateModifiedOrder).WillReturnError(errors.New("connection refused"))
-
-		c.ErrorContains(postgres{}.insertOrUpdateOrder(ctx, storedOrder()), "insert or update order")
-		c.ErrorContains(postgres{}.updateCancelledOrder(ctx, uuid.New(), nil, createdAt), "update cancelled order")
-		c.ErrorContains(postgres{}.updateModifiedOrder(ctx, uuid.New(), 9200, 2, createdAt), "update modified order")
-	})
-}
-
-func TestPostgresInsertTrade(t *testing.T) {
-	trade := models.Trade{ID: uuid.New(), BuyOrderID: uuid.New(), SellOrderID: uuid.New(), Price: 9000, Quantity: 4, Amount: 36000,
-		CreatedAt: time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)}
-
-	t.Run("a new trade is added to both orders", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectExec(insertTrade).WithArgs(trade.ID, trade.BuyOrderID, trade.SellOrderID, trade.Price, trade.Quantity,
-			trade.Amount, trade.CreatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(addTradeToOrder).WithArgs(trade.BuyOrderID, trade.Quantity, trade.Amount, trade.CreatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(addTradeToOrder).WithArgs(trade.SellOrderID, trade.Quantity, trade.Amount, trade.CreatedAt).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectCommit()
-
-		c.NoError(postgres{}.insertTrade(ctx, trade))
-	})
-
-	t.Run("a trade already recorded changes no order", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectExec(insertTrade).WillReturnResult(sqlmock.NewResult(0, 0))
-		mocks.SQL.ExpectCommit()
-
-		c.NoError(postgres{}.insertTrade(ctx, trade))
-	})
-
-	t.Run("a failed update records nothing", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectExec(insertTrade).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(addTradeToOrder).WillReturnError(errors.New("connection reset"))
-		mocks.SQL.ExpectRollback()
-
-		c.ErrorContains(postgres{}.insertTrade(ctx, trade), "add trade to order")
 	})
 }

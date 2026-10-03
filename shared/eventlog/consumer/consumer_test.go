@@ -87,107 +87,76 @@ func publishRaw(c *require.Assertions, topic string, value []byte) {
 	c.NoError(client.ProduceSync(context.Background(), &kgo.Record{Topic: topic, Value: value}).FirstErr())
 }
 
-func startConsumer(c *require.Assertions, ctx context.Context, subscriptions ...Subscription[context.Context]) {
-	c.NoError(Start(ctx, []string{brokers}, "consumer-test-"+uuid.NewString(), silentLogger{}, subscriptions...))
+func startGroup(c *require.Assertions, ctx context.Context, group string, routes []string,
+	handle func(context.Context, []events.Message) error,
+) {
+	c.NoError(StartGroup(ctx, []string{brokers}, group, routes, 500, silentLogger{}, handle))
 }
 
-func sendTo(received chan events.Message) func(context.Context, events.Message) error {
-	return func(_ context.Context, message events.Message) error {
-		received <- message
+func sendMessagesTo(batches chan []events.Message) func(context.Context, []events.Message) error {
+	return func(_ context.Context, batch []events.Message) error {
+		batches <- batch
 
 		return nil
 	}
 }
 
-func waitFor(ctx context.Context, c *require.Assertions, received chan events.Message) events.Message {
-	select {
-	case message := <-received:
-		return message
-	case <-ctx.Done():
-		c.Fail("nothing received")
+// Batches can split the messages in any way, so it gathers count of them.
+func collectMessageIDs(ctx context.Context, c *require.Assertions, batches chan []events.Message, count int) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, count)
 
-		return events.Message{}
+	for len(ids) < count {
+		select {
+		case batch := <-batches:
+			for _, message := range batch {
+				ids = append(ids, message.ID)
+			}
+		case <-ctx.Done():
+			c.Fail("not every message arrived", "got %d of %d", len(ids), count)
+
+			return ids
+		}
 	}
+
+	return ids
 }
 
-func TestStartIntegration(t *testing.T) {
-	t.Run("published message reaches its handler quickly", func(t *testing.T) {
+func requireCommitted(c *require.Assertions, group, topic string, offset int64) {
+	admin, err := kgo.NewClient(kgo.SeedBrokers(brokers))
+	c.NoError(err)
+	defer admin.Close()
+
+	c.Eventually(func() bool {
+		offsets, err := kadm.NewClient(admin).FetchOffsets(context.Background(), group)
+		if err != nil {
+			return false
+		}
+
+		committed, ok := offsets.Lookup(topic, 0)
+
+		return ok && committed.At == offset
+	}, 10*time.Second, 20*time.Millisecond)
+}
+
+func TestStartGroup(t *testing.T) {
+	t.Run("a batch brings only the messages of its routes, in log order", func(t *testing.T) {
 		c := require.New(t)
 		connectProducer(t)
 		topic := createTopic(t)
-		message := publish(c, topic, "Created")
-		publishedAt := time.Now()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-
-		received := make(chan events.Message, 1)
-		startConsumer(c, ctx, Subscribe(topic+".Created", sendTo(received)))
-
-		c.Equal(message.ID, waitFor(ctx, c, received).ID)
-		c.Less(time.Since(publishedAt), 5*time.Second)
-	})
-
-	t.Run("a failed message is retried, not skipped", func(t *testing.T) {
-		c := require.New(t)
-		connectProducer(t)
-		topic := createTopic(t)
-		message := publish(c, topic, "Created")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-
-		received := make(chan events.Message, 10)
-		calls := 0
-		startConsumer(c, ctx, Subscribe(topic+".Created", func(_ context.Context, consumed events.Message) error {
-			calls++
-			received <- consumed
-
-			if calls == 1 {
-				return errors.New("database unavailable")
-			}
-
-			return nil
-		}))
-
-		c.Equal(message.ID, waitFor(ctx, c, received).ID)
-		c.Equal(message.ID, waitFor(ctx, c, received).ID)
-	})
-
-	t.Run("record that is not a message is skipped", func(t *testing.T) {
-		c := require.New(t)
-		connectProducer(t)
-		topic := createTopic(t)
-		publishRaw(c, topic, []byte("not a message"))
-		message := publish(c, topic, "Created")
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-
-		received := make(chan events.Message, 1)
-		startConsumer(c, ctx, Subscribe(topic+".Created", sendTo(received)))
-
-		c.Equal(message.ID, waitFor(ctx, c, received).ID)
-	})
-
-	t.Run("a type without subscription is committed and skipped", func(t *testing.T) {
-		c := require.New(t)
-		connectProducer(t)
-		topic := createTopic(t)
+		first := publish(c, topic, "Created")
 		publish(c, topic, "Ignored")
-		message := publish(c, topic, "Created")
+		second := publish(c, topic, "Created")
 
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 
-		received := make(chan events.Message, 10)
-		startConsumer(c, ctx, Subscribe(topic+".Created", sendTo(received)))
+		batches := make(chan []events.Message, 10)
+		startGroup(c, ctx, "consumer-test-"+uuid.NewString(), []string{topic + ".Created"}, sendMessagesTo(batches))
 
-		c.Equal(message.ID, waitFor(ctx, c, received).ID)
-		c.Empty(received)
+		c.Equal([]uuid.UUID{first.ID, second.ID}, collectMessageIDs(ctx, c, batches, 2))
 	})
 
-	t.Run("each route reaches its own handler", func(t *testing.T) {
+	t.Run("routes of two topics reach the same handler", func(t *testing.T) {
 		c := require.New(t)
 		connectProducer(t)
 		commandsTopic, eventsTopic := createTopic(t), createTopic(t)
@@ -197,22 +166,87 @@ func TestStartIntegration(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 
-		receivedCommands := make(chan events.Message, 1)
-		receivedEvents := make(chan events.Message, 1)
-		startConsumer(c, ctx,
-			Subscribe(commandsTopic+".NewOrder", sendTo(receivedCommands)),
-			Subscribe(eventsTopic+".TradeExecuted", sendTo(receivedEvents)),
-		)
+		batches := make(chan []events.Message, 10)
+		startGroup(c, ctx, "consumer-test-"+uuid.NewString(),
+			[]string{commandsTopic + ".NewOrder", eventsTopic + ".TradeExecuted"}, sendMessagesTo(batches))
 
-		c.Equal(command.ID, waitFor(ctx, c, receivedCommands).ID)
-		c.Equal(event.ID, waitFor(ctx, c, receivedEvents).ID)
+		c.ElementsMatch([]uuid.UUID{command.ID, event.ID}, collectMessageIDs(ctx, c, batches, 2))
 	})
 
-	t.Run("route without a type is rejected", func(t *testing.T) {
+	t.Run("an applied batch is committed, so the group does not get it again", func(t *testing.T) {
+		c := require.New(t)
+		connectProducer(t)
+		topic := createTopic(t)
+		group := "consumer-test-" + uuid.NewString()
+		first := publish(c, topic, "Created")
+
+		firstCtx, stopFirst := context.WithTimeout(context.Background(), 20*time.Second)
+		defer stopFirst()
+
+		batches := make(chan []events.Message, 10)
+		startGroup(c, firstCtx, group, []string{topic + ".Created"}, sendMessagesTo(batches))
+		c.Equal([]uuid.UUID{first.ID}, collectMessageIDs(firstCtx, c, batches, 1))
+		requireCommitted(c, group, topic, 1)
+		stopFirst()
+
+		second := publish(c, topic, "Created")
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		restarted := make(chan []events.Message, 10)
+		startGroup(c, ctx, group, []string{topic + ".Created"}, sendMessagesTo(restarted))
+
+		c.Equal([]uuid.UUID{second.ID}, collectMessageIDs(ctx, c, restarted, 1))
+	})
+
+	t.Run("a failed batch is retried without being committed", func(t *testing.T) {
+		c := require.New(t)
+		connectProducer(t)
+		topic := createTopic(t)
+		message := publish(c, topic, "Created")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		batches := make(chan []events.Message, 10)
+		calls := 0
+		startGroup(c, ctx, "consumer-test-"+uuid.NewString(), []string{topic + ".Created"},
+			func(_ context.Context, batch []events.Message) error {
+				calls++
+				batches <- batch
+
+				if calls == 1 {
+					return errors.New("database unavailable")
+				}
+
+				return nil
+			})
+
+		c.Equal([]uuid.UUID{message.ID}, collectMessageIDs(ctx, c, batches, 1))
+		c.Equal([]uuid.UUID{message.ID}, collectMessageIDs(ctx, c, batches, 1), "the same batch, again")
+	})
+
+	t.Run("a record that is not a message is left out", func(t *testing.T) {
+		c := require.New(t)
+		connectProducer(t)
+		topic := createTopic(t)
+		publishRaw(c, topic, []byte("not a message"))
+		message := publish(c, topic, "Created")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		batches := make(chan []events.Message, 10)
+		startGroup(c, ctx, "consumer-test-"+uuid.NewString(), []string{topic + ".Created"}, sendMessagesTo(batches))
+
+		c.Equal([]uuid.UUID{message.ID}, collectMessageIDs(ctx, c, batches, 1))
+	})
+
+	t.Run("a route without a type is rejected", func(t *testing.T) {
 		c := require.New(t)
 
-		err := Start(context.Background(), []string{brokers}, "consumer-test-"+uuid.NewString(), silentLogger{},
-			Subscribe("orders", func(context.Context, events.Message) error { return nil }))
+		err := StartGroup(context.Background(), []string{brokers}, "consumer-test-"+uuid.NewString(), []string{"orders"}, 500,
+			silentLogger{}, func(context.Context, []events.Message) error { return nil })
 		c.ErrorIs(err, events.ErrInvalidRoute)
 	})
 }

@@ -64,15 +64,14 @@ The other two trades are 3 VIB at `"9500"` with Beto (`amount` `"28500"`) and 1 
 ## Consuming
 
 ```go
-consumer.Start(ctx, brokers, group, ctx.Logger,
-	consumer.Subscribe(events.RouteNewOrder, insertneworder.Handle),
-)
+consumer.StartGroup(ctx, brokers, group, applyordermessages.Routes, 500, ctx.Logger, applyordermessages.Handle)
 ```
 
-- One `Start` per service role, in `app.OnStart`, with one `Subscribe` per route, like HTTP routes. Each route has its own handler package (`handlers/insert-new-order`) with `func Handle(ctx *gofr.Context, message events.Message) error`.
-- Delivery is at least once: a message is committed only after its handler returns `nil`, and an error retries the same message, so return an error only when retrying can succeed (a store failure). A payload that can never be applied is logged and skipped (`return nil`).
-- Handlers are idempotent, because a message can arrive twice: write with `ON CONFLICT … DO NOTHING` or check the message `id`.
-- A route nobody subscribed to is committed without being handled. There is no order across topics: a handler that needs something another topic creates returns an error until it exists.
+- One `StartGroup` per service role, in `app.OnStart`, with the routes it reads. The role has one handler package for all of them (`handlers/apply-order-messages`), which exports its `Routes` and `func Handle(ctx *gofr.Context, messages []events.Message) error`. It gets batches of what is available, up to the size `main` passes (500), in the order read, without waiting for more.
+- **Why batches:** the handler applies the whole batch with one call to its store (one statement or one PostgreSQL function), so a batch costs one round trip to the database and one commit to the log, not one per message.
+- Delivery is at least once: a batch is committed, together with the records of routes the role does not read, only after its handler returns `nil`, and an error retries the same batch, so return an error only when retrying can succeed (a store failure). A payload that can never be applied is logged and left out of the batch.
+- Handlers are idempotent, because a batch can arrive twice: write with `ON CONFLICT … DO NOTHING` or check the message `id`.
+- There is no order across topics, and a reader of two topics gets both in its batches, so a handler never waits for a message of the other topic: an error would retry its batch forever. It applies each message whichever comes first, as the projector does with an order's `NewOrder` and its first event.
 
 ## Reading a partition
 
@@ -80,7 +79,7 @@ consumer.Start(ctx, brokers, group, ctx.Logger,
 consumer.StartPartition(ctx, brokers, events.TopicOrderCommands, book.Partition, maxBatch, ctx.Logger, applycommands.Handle)
 ```
 
-The matching engine is the one exception to `Start`. It reads the partition of its book from the first offset on every start, without a consumer group, and gets batches of what is available, up to `maxBatch`: `func Handle(ctx *gofr.Context, records []consumer.Record) error`.
+The matching engine reads one partition instead of a group. It reads the partition of its book from the first offset on every start, without a consumer group, and gets batches of what is available, up to `maxBatch`: `func Handle(ctx *gofr.Context, records []consumer.Record) error`.
 
 - **Why:** the book lives in memory, so it is rebuilt by rereading every command, and a group would resume from its last commit and could hand the partition to another pod. A batch lets the engine reserve the funds of all its new orders in one call to WalletService before applying its commands in log order.
 - **One handler for every route of the partition** (`handlers/apply-commands`), because the commands of a batch are applied together and in order; it chooses what to do by the message route.

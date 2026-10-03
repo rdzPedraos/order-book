@@ -35,7 +35,7 @@ Functions and methods are `verbObject`: a verb from this table, then what it act
 | `set` | Stores a value somewhere that keeps it (a gauge, a field) | `setProjectionLag` |
 | `format` | Turns a typed value into its text form | `money.Format`, `formatOptionalAmount` |
 | `is`, `has` | Answers a yes/no question | `isSupportedCombination`, `isInQuery`, `isValidSide` |
-| `start`, `serve`, `run` | Begins work that keeps running in the background | `consumer.Start`, `serveAPI`, `runProjector` |
+| `start`, `serve`, `run` | Begins work that keeps running in the background | `consumer.StartGroup`, `serveAPI`, `runProjector` |
 
 - The object is never left out: `publishCancelOrder`, not `publish`; `getOwnedOrder`, not `ownedOrder`; `buildModifyOrder`, not `change`.
 - No generic verbs that hide what happens: `handle`, `process`, `do`, `exec`, `manage`, `fetch`, `record`. `Handle` is the one exception, because it is the entry point every handler package exposes to Gofr.

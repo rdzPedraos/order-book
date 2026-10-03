@@ -10,5 +10,7 @@ func All() map[int64]migration.Migrate {
 		20261003000001: createLedger(),
 		20261005000000: addTradeMovements(),
 		20261006000000: createApplyFundsBatch(),
+		20261007000000: createApplyTradeMovements(),
+		20261008000000: lockBalancesInOrder(),
 	}
 }

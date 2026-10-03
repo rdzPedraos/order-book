@@ -27,7 +27,7 @@ type walletDB interface {
 	withdraw(ctx *gofr.Context, movement models.Movement) error
 	listMovements(ctx *gofr.Context, query MovementQuery) ([]models.Movement, error)
 	applyFundsBatch(ctx *gofr.Context, operations []models.FundsOperation) ([]models.FundsResult, error)
-	applyTrade(ctx *gofr.Context, trade models.Trade) error
+	applyTrades(ctx *gofr.Context, trades []models.Trade) error
 }
 
 type postgres struct{}
@@ -68,10 +68,11 @@ func ApplyFundsBatch(ctx *gofr.Context, operations []models.FundsOperation) ([]m
 	return db.applyFundsBatch(ctx, operations)
 }
 
-// Moves the trade between buyer and seller and writes it in the ledger, in one
-// transaction. A trade already applied moves nothing.
-func ApplyTrade(ctx *gofr.Context, trade models.Trade) error {
-	return db.applyTrade(ctx, trade)
+// Moves each trade between buyer and seller and writes its four movements in
+// the ledger, all the trades or none. A movement already in the ledger moves
+// nothing, so a trade applied before, or twice in the batch, is paid once.
+func ApplyTrades(ctx *gofr.Context, trades []models.Trade) error {
+	return db.applyTrades(ctx, trades)
 }
 
 func fillWalletCurrencies(userID string, stored []models.Balance) []models.Balance {

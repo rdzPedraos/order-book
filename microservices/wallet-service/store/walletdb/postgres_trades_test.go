@@ -1,6 +1,8 @@
 package walletdb
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -20,54 +22,84 @@ func newTrade(buyerID, sellerID string, quantity, amount int64) models.Trade {
 	}
 }
 
-func TestPostgresApplyTrade(t *testing.T) {
-	t.Run("each person pays from reserved and receives in available", func(t *testing.T) {
+type encodedMovements []models.Movement
+
+func (expected encodedMovements) Match(value driver.Value) bool {
+	encoded, isString := value.(string)
+	if !isString {
+		return false
+	}
+
+	var rows []movementRow
+	if err := json.Unmarshal([]byte(encoded), &rows); err != nil || len(rows) != len(expected) {
+		return false
+	}
+
+	for position, row := range rows {
+		if !isRowOfMovement(row, expected[position]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func isRowOfMovement(row movementRow, movement models.Movement) bool {
+	return row.ID != uuid.Nil && row.Type == movement.Type && row.UserID == movement.UserID &&
+		row.Currency == movement.Currency && row.Amount == movement.Amount && row.MessageID == *movement.MessageID
+}
+
+func buildMovements(c *require.Assertions, trades ...models.Trade) encodedMovements {
+	var movements encodedMovements
+
+	for _, trade := range trades {
+		built, err := trade.BuildMovements()
+		c.NoError(err)
+
+		movements = append(movements, built...)
+	}
+
+	return movements
+}
+
+func TestPostgresApplyTrades(t *testing.T) {
+	t.Run("a batch is one query with the four movements of each trade", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		trade := newTrade("carla", "victor", 2, 19000)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectQuery(isTradeApplied).WithArgs(trade.MessageID).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-		mocks.SQL.ExpectExec(takeReserved).WithArgs("carla", money.BRL, int64(19000)).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(addAvailable).WithArgs("carla", money.VIB, int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(takeReserved).WithArgs("victor", money.VIB, int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(addAvailable).WithArgs("victor", money.BRL, int64(19000)).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectExec(insertMovement).WillReturnResult(sqlmock.NewResult(0, 1))
-		mocks.SQL.ExpectCommit()
+		first, second := newTrade("carla", "victor", 2, 19000), newTrade("victor", "ana", 1, 9500)
+		mocks.SQL.ExpectExec(applyTradeMovements).WithArgs(buildMovements(c, first, second)).WillReturnResult(sqlmock.NewResult(0, 1))
 
-		c.NoError(postgres{}.applyTrade(ctx, trade))
+		c.NoError(postgres{}.applyTrades(ctx, []models.Trade{first, second}))
 	})
 
-	t.Run("a trade already applied moves nothing", func(t *testing.T) {
+	t.Run("database error is returned", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectQuery(isTradeApplied).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-		mocks.SQL.ExpectCommit()
+		connectionReset := errors.New("connection reset")
+		mocks.SQL.ExpectExec(applyTradeMovements).WillReturnError(connectionReset)
 
-		c.NoError(postgres{}.applyTrade(ctx, newTrade("carla", "victor", 2, 19000)))
-	})
-
-	t.Run("a failed movement applies nothing", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectBegin()
-		mocks.SQL.ExpectQuery(isTradeApplied).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-		mocks.SQL.ExpectExec(takeReserved).WillReturnError(errors.New("connection reset"))
-		mocks.SQL.ExpectRollback()
-
-		c.ErrorContains(postgres{}.applyTrade(ctx, newTrade("carla", "victor", 2, 19000)), "apply TRADE_PAID")
+		c.ErrorIs(postgres{}.applyTrades(ctx, []models.Trade{newTrade("carla", "victor", 2, 19000)}), connectionReset)
 	})
 }
 
-func TestMockApplyTrade(t *testing.T) {
+func TestMockApplyTrades(t *testing.T) {
+	t.Run("a repeated trade in a batch moves money once", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.Balances = []models.Balance{{UserID: "carla", Currency: money.BRL, Reserved: 19000}, {UserID: "victor", Currency: money.VIB, Reserved: 2}}
+		trade := newTrade("carla", "victor", 2, 19000)
+
+		c.NoError(ApplyTrades(nil, []models.Trade{trade, trade}))
+
+		c.Len(mock.Movements, 4)
+		c.Equal(int64(19000), mock.getOrCreateBalance("victor", money.BRL).Available)
+	})
+
 	t.Run("an unavailable database", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
 		mock.Err = errors.New("connection refused")
 
-		c.ErrorIs(ApplyTrade(nil, newTrade("carla", "victor", 2, 19000)), mock.Err)
+		c.ErrorIs(ApplyTrades(nil, []models.Trade{newTrade("carla", "victor", 2, 19000)}), mock.Err)
 	})
 }

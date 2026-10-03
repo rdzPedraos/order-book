@@ -11,20 +11,14 @@ import (
 
 	"gofr.dev/pkg/gofr"
 
-	applyorderaccepted "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-accepted"
-	applyordercancelled "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-cancelled"
-	applyordermodified "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-modified"
-	applyorderrejected "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-rejected"
-	applytradeexecuted "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-trade-executed"
+	applyordermessages "github.com/rdzpedraos/order-book/microservices/order-service/handlers/apply-order-messages"
 	changeorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/change-order"
 	closeorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/close-order"
 	createorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/create-order"
 	getorder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/get-order"
-	insertneworder "github.com/rdzpedraos/order-book/microservices/order-service/handlers/insert-new-order"
 	listorders "github.com/rdzpedraos/order-book/microservices/order-service/handlers/list-orders"
 	"github.com/rdzpedraos/order-book/microservices/order-service/migrations"
 	"github.com/rdzpedraos/order-book/shared/eventlog/consumer"
-	"github.com/rdzpedraos/order-book/shared/eventlog/events"
 	"github.com/rdzpedraos/order-book/shared/eventlog/producer"
 	"github.com/rdzpedraos/order-book/shared/identity"
 )
@@ -62,18 +56,15 @@ func serveAPI(app *gofr.App, brokers []string) {
 	app.POST("/orders/{id}/close", closeorder.Handle)
 }
 
+// The most messages the projector applies at once, as the engine does.
+const projectorBatch = 500
+
 // The hook's context ends with the app, which stops the consumer.
 func runProjector(app *gofr.App, brokers []string) {
-	app.Metrics().NewGauge(insertneworder.LagMetric, "seconds between accepting a command and storing it in orders")
+	app.Metrics().NewGauge(applyordermessages.LagMetric, "seconds between accepting a command and storing it in orders")
 
 	app.OnStart(func(ctx *gofr.Context) error {
-		return consumer.Start(ctx, brokers, app.Config.Get("COMMAND_LOG_GROUP"), ctx.Logger,
-			consumer.Subscribe(events.RouteNewOrder, insertneworder.Handle),
-			consumer.Subscribe(events.RouteOrderAccepted, applyorderaccepted.Handle),
-			consumer.Subscribe(events.RouteOrderRejected, applyorderrejected.Handle),
-			consumer.Subscribe(events.RouteOrderCancelled, applyordercancelled.Handle),
-			consumer.Subscribe(events.RouteOrderModified, applyordermodified.Handle),
-			consumer.Subscribe(events.RouteTradeExecuted, applytradeexecuted.Handle),
-		)
+		return consumer.StartGroup(ctx, brokers, app.Config.Get("COMMAND_LOG_GROUP"), applyordermessages.Routes,
+			projectorBatch, ctx.Logger, applyordermessages.Handle)
 	})
 }

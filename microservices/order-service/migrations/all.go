@@ -9,5 +9,6 @@ func All() map[int64]migration.Migrate {
 		20261001000000: createOrders(),
 		20261005000000: addReason(),
 		20261005000001: trackExecutions(),
+		20261007000000: createApplyOrderChanges(),
 	}
 }

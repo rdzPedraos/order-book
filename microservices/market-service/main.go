@@ -9,12 +9,14 @@ import (
 
 	"gofr.dev/pkg/gofr"
 
-	applylevelchanged "github.com/rdzpedraos/order-book/microservices/market-service/handlers/apply-level-changed"
+	applylevelchanges "github.com/rdzpedraos/order-book/microservices/market-service/handlers/apply-level-changes"
 	getorderbook "github.com/rdzpedraos/order-book/microservices/market-service/handlers/get-orderbook"
 	"github.com/rdzpedraos/order-book/microservices/market-service/migrations"
 	"github.com/rdzpedraos/order-book/shared/eventlog/consumer"
-	"github.com/rdzpedraos/order-book/shared/eventlog/events"
 )
+
+// The most events the market applies at once, as the engine does.
+const levelBatch = 500
 
 func main() {
 	app := gofr.New()
@@ -27,9 +29,8 @@ func main() {
 
 	// The hook's context ends with the app, which stops the consumer.
 	app.OnStart(func(ctx *gofr.Context) error {
-		return consumer.Start(ctx, brokers, app.Config.Get("EVENT_LOG_GROUP"), ctx.Logger,
-			consumer.Subscribe(events.RouteOrderBookLevelChanged, applylevelchanged.Handle),
-		)
+		return consumer.StartGroup(ctx, brokers, app.Config.Get("EVENT_LOG_GROUP"), applylevelchanges.Routes,
+			levelBatch, ctx.Logger, applylevelchanges.Handle)
 	})
 
 	app.Run()

@@ -26,11 +26,19 @@ func InitMock(t testing.TB) *Mock {
 	return mock
 }
 
-func (m *Mock) updateLevel(_ *gofr.Context, level models.Level) error {
+func (m *Mock) updateLevels(_ *gofr.Context, levels []models.Level) error {
 	if m.Err != nil {
 		return m.Err
 	}
 
+	for _, level := range levels {
+		m.updateLevel(level)
+	}
+
+	return nil
+}
+
+func (m *Mock) updateLevel(level models.Level) {
 	m.Levels = slices.DeleteFunc(m.Levels, func(stored models.Level) bool {
 		return stored.Book == level.Book && stored.Side == level.Side && stored.Price == level.Price
 	})
@@ -38,8 +46,6 @@ func (m *Mock) updateLevel(_ *gofr.Context, level models.Level) error {
 	if level.Volume > 0 {
 		m.Levels = append(m.Levels, level)
 	}
-
-	return nil
 }
 
 func (m *Mock) listLevels(_ *gofr.Context, book, side string, depth int) ([]models.Level, error) {

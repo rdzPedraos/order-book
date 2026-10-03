@@ -34,6 +34,30 @@ func newIntegrationContext(t *testing.T) *gofr.Context {
 	return &gofr.Context{Context: context.Background(), Container: db}
 }
 
+func applyChanges(c *require.Assertions, ctx *gofr.Context, changes ...Change) {
+	c.NoError(ApplyChanges(ctx, changes))
+}
+
+func insertChange(order models.Order) Change {
+	return Change{Kind: ChangeInsert, Order: &order}
+}
+
+func firstEventChange(order models.Order) Change {
+	return Change{Kind: ChangeFirstEvent, Order: &order}
+}
+
+func cancelChange(id uuid.UUID, reason *string) Change {
+	return Change{Kind: ChangeCancel, OrderID: id, Reason: reason, At: time.Now()}
+}
+
+func modifyChange(id uuid.UUID, limit, pendingQuantity int64) Change {
+	return Change{Kind: ChangeModify, OrderID: id, Limit: limit, PendingQuantity: pendingQuantity, At: time.Now()}
+}
+
+func tradeChange(trade models.Trade) Change {
+	return Change{Kind: ChangeTrade, Trade: &trade}
+}
+
 func insertOrders(t *testing.T, ctx *gofr.Context, userID string, side models.Side, n int) []uuid.UUID {
 	t.Helper()
 	c := require.New(t)
@@ -48,7 +72,7 @@ func insertOrders(t *testing.T, ctx *gofr.Context, userID string, side models.Si
 			Limit: &price, Quantity: &quantity, Status: models.StatusPending,
 			CreatedAt: createdAt, UpdatedAt: createdAt,
 		}
-		c.NoError(InsertOrder(ctx, order))
+		applyChanges(c, ctx, insertChange(order))
 
 		ids = append(ids, order.ID)
 	}
@@ -122,7 +146,7 @@ func TestInsertOrderTwiceIntegration(t *testing.T) {
 
 	order, err := GetOrder(ctx, userID, id)
 	c.NoError(err)
-	c.NoError(InsertOrder(ctx, order))
+	applyChanges(c, ctx, insertChange(order))
 
 	orders, err := ListOrders(ctx, ListQuery{UserID: userID, Limit: 10})
 	c.NoError(err)
@@ -157,8 +181,8 @@ func TestFirstEventIntegration(t *testing.T) {
 		accepted := pending
 		accepted.Status = models.StatusOpen
 
-		c.NoError(InsertOrder(ctx, pending))
-		c.NoError(InsertOrUpdateOrder(ctx, accepted))
+		applyChanges(c, ctx, insertChange(pending))
+		applyChanges(c, ctx, firstEventChange(accepted))
 		c.Equal(models.StatusOpen, getStatus(c, ctx, pending))
 	})
 
@@ -168,9 +192,21 @@ func TestFirstEventIntegration(t *testing.T) {
 		accepted := pending
 		accepted.Status = models.StatusOpen
 
-		c.NoError(InsertOrUpdateOrder(ctx, accepted))
-		c.NoError(InsertOrder(ctx, pending))
+		applyChanges(c, ctx, firstEventChange(accepted))
+		applyChanges(c, ctx, insertChange(pending))
 		c.Equal(models.StatusOpen, getStatus(c, ctx, pending))
+	})
+
+	t.Run("the command and the event in one batch, either way", func(t *testing.T) {
+		c := require.New(t)
+		first, second := newPendingOrder("integration-"+uuid.NewString()), newPendingOrder("integration-"+uuid.NewString())
+		firstAccepted, secondAccepted := first, second
+		firstAccepted.Status, secondAccepted.Status = models.StatusOpen, models.StatusOpen
+
+		applyChanges(c, ctx, insertChange(first), firstEventChange(firstAccepted), firstEventChange(secondAccepted), insertChange(second))
+
+		c.Equal(models.StatusOpen, getStatus(c, ctx, first))
+		c.Equal(models.StatusOpen, getStatus(c, ctx, second))
 	})
 
 	t.Run("a repeated first event leaves a later status", func(t *testing.T) {
@@ -178,10 +214,9 @@ func TestFirstEventIntegration(t *testing.T) {
 		pending := newPendingOrder("integration-" + uuid.NewString())
 		accepted := pending
 		accepted.Status = models.StatusOpen
-		c.NoError(InsertOrUpdateOrder(ctx, accepted))
-		c.NoError(UpdateCancelledOrder(ctx, pending.ID, nil, time.Now()))
+		applyChanges(c, ctx, firstEventChange(accepted), cancelChange(pending.ID, nil))
 
-		c.NoError(InsertOrUpdateOrder(ctx, accepted))
+		applyChanges(c, ctx, firstEventChange(accepted))
 		c.Equal(models.StatusCancelled, getStatus(c, ctx, pending))
 	})
 }
@@ -192,12 +227,10 @@ func TestEngineUpdatesIntegration(t *testing.T) {
 	t.Run("a modification and a cancellation of an open order", func(t *testing.T) {
 		c := require.New(t)
 		pending := newPendingOrder("integration-" + uuid.NewString())
-		c.NoError(InsertOrder(ctx, pending))
+		applyChanges(c, ctx, insertChange(pending))
 
-		c.NoError(UpdateModifiedOrder(ctx, pending.ID, 9200, 4, time.Now()))
 		reason := "no_liquidity"
-		c.NoError(UpdateCancelledOrder(ctx, pending.ID, &reason, time.Now()))
-		c.NoError(UpdateModifiedOrder(ctx, pending.ID, 9900, 9, time.Now()))
+		applyChanges(c, ctx, modifyChange(pending.ID, 9200, 4), cancelChange(pending.ID, &reason), modifyChange(pending.ID, 9900, 9))
 
 		stored, err := GetOrder(ctx, pending.UserID, pending.ID)
 		c.NoError(err)
@@ -213,12 +246,11 @@ func TestInsertTradeIntegration(t *testing.T) {
 		c := require.New(t)
 		buy, sell := newPendingOrder("integration-"+uuid.NewString()), newPendingOrder("integration-"+uuid.NewString())
 		sell.Side, *sell.Quantity = models.SideSell, 4
-		c.NoError(InsertOrder(ctx, buy))
-		c.NoError(InsertOrder(ctx, sell))
+		applyChanges(c, ctx, insertChange(buy), insertChange(sell))
 		trade := models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 8500, Quantity: 4, Amount: 34000, CreatedAt: time.Now()}
 
-		c.NoError(InsertTrade(ctx, trade))
-		c.NoError(InsertTrade(ctx, trade))
+		applyChanges(c, ctx, tradeChange(trade))
+		applyChanges(c, ctx, tradeChange(trade))
 
 		storedBuy, err := GetOrder(ctx, buy.UserID, buy.ID)
 		c.NoError(err)
@@ -232,11 +264,41 @@ func TestInsertTradeIntegration(t *testing.T) {
 		amount := int64(30000)
 		buy.Type, buy.Limit, buy.Quantity, buy.Amount = models.TypeMarket, nil, nil, &amount
 		sell.Side = models.SideSell
-		c.NoError(InsertOrder(ctx, buy))
-		c.NoError(InsertOrder(ctx, sell))
+		applyChanges(c, ctx, insertChange(buy), insertChange(sell))
 
-		c.NoError(InsertTrade(ctx, models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 10000, Quantity: 3, Amount: 30000, CreatedAt: time.Now()}))
+		applyChanges(c, ctx, tradeChange(models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 10000, Quantity: 3, Amount: 30000, CreatedAt: time.Now()}))
 
 		c.Equal(models.StatusFilled, getStatus(c, ctx, buy))
+	})
+
+	t.Run("two trades of an order in one batch add up", func(t *testing.T) {
+		c := require.New(t)
+		buy, sell := newPendingOrder("integration-"+uuid.NewString()), newPendingOrder("integration-"+uuid.NewString())
+		sell.Side = models.SideSell
+		applyChanges(c, ctx, insertChange(buy), insertChange(sell))
+
+		applyChanges(c, ctx,
+			tradeChange(models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 9000, Quantity: 3, Amount: 27000, CreatedAt: time.Now()}),
+			tradeChange(models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 9000, Quantity: 4, Amount: 36000, CreatedAt: time.Now()}),
+		)
+
+		stored, err := GetOrder(ctx, buy.UserID, buy.ID)
+		c.NoError(err)
+		c.Equal([]any{models.StatusPartiallyFilled, int64(7), int64(63000)}, []any{stored.Status, stored.FilledQuantity, stored.FilledAmount})
+	})
+}
+
+func TestApplyChangesIntegration(t *testing.T) {
+	ctx := newIntegrationContext(t)
+
+	t.Run("a batch that fails applies none of its changes", func(t *testing.T) {
+		c := require.New(t)
+		valid, invalid := newPendingOrder("integration-"+uuid.NewString()), newPendingOrder("integration-"+uuid.NewString())
+		invalid.Side = "UP"
+
+		c.Error(ApplyChanges(ctx, []Change{insertChange(valid), insertChange(invalid)}))
+
+		_, err := GetOrder(ctx, valid.UserID, valid.ID)
+		c.ErrorIs(err, models.ErrOrderNotFound)
 	})
 }

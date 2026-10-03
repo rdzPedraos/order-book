@@ -1,4 +1,4 @@
-package applytrade
+package applytrades
 
 import (
 	"context"
@@ -61,8 +61,14 @@ func getTotal(mock *walletdb.Mock, currency money.Currency) int64 {
 	return total
 }
 
+func deliver(t *testing.T, messages ...events.Message) error {
+	t.Helper()
+
+	return Handle(newContext(t), messages)
+}
+
 func TestHandle(t *testing.T) {
-	t.Run("settlement of a trade", func(t *testing.T) {
+	t.Run("payment of a trade", func(t *testing.T) {
 		c := require.New(t)
 		mock := walletdb.InitMock(t)
 		mock.Balances = []models.Balance{
@@ -70,7 +76,7 @@ func TestHandle(t *testing.T) {
 			{UserID: "victor", Currency: money.VIB, Reserved: 2},
 		}
 
-		c.NoError(Handle(newContext(t), tradeMessage(c, "carla", "victor", 2, 9500)))
+		c.NoError(deliver(t, tradeMessage(c, "carla", "victor", 2, 9500)))
 
 		c.Equal(models.Balance{UserID: "carla", Currency: money.BRL}, getBalance(mock, "carla", money.BRL))
 		c.Equal(models.Balance{UserID: "carla", Currency: money.VIB, Available: 2}, getBalance(mock, "carla", money.VIB))
@@ -79,7 +85,7 @@ func TestHandle(t *testing.T) {
 		c.Len(mock.Movements, 4, "each person pays and receives")
 	})
 
-	t.Run("repeated trade", func(t *testing.T) {
+	t.Run("duplicated delivery", func(t *testing.T) {
 		c := require.New(t)
 		mock := walletdb.InitMock(t)
 		mock.Balances = []models.Balance{
@@ -88,8 +94,8 @@ func TestHandle(t *testing.T) {
 		}
 		trade := tradeMessage(c, "carla", "victor", 2, 9500)
 
-		c.NoError(Handle(newContext(t), trade))
-		c.NoError(Handle(newContext(t), trade))
+		c.NoError(deliver(t, trade, trade))
+		c.NoError(deliver(t, trade))
 
 		c.Equal(models.Balance{UserID: "carla", Currency: money.BRL, Reserved: 19000}, getBalance(mock, "carla", money.BRL))
 		c.Len(mock.Movements, 4)
@@ -104,8 +110,7 @@ func TestHandle(t *testing.T) {
 		}
 		brlBefore, vibBefore := getTotal(mock, money.BRL), getTotal(mock, money.VIB)
 
-		c.NoError(Handle(newContext(t), tradeMessage(c, "ana", "beto", 3, 9500)))
-		c.NoError(Handle(newContext(t), tradeMessage(c, "beto", "ana", 2, 9800)))
+		c.NoError(deliver(t, tradeMessage(c, "ana", "beto", 3, 9500), tradeMessage(c, "beto", "ana", 2, 9800)))
 
 		c.Equal(brlBefore, getTotal(mock, money.BRL))
 		c.Equal(vibBefore, getTotal(mock, money.VIB))
@@ -116,14 +121,30 @@ func TestHandle(t *testing.T) {
 		mock := walletdb.InitMock(t)
 		mock.Err = errors.New("connection refused")
 
-		c.ErrorIs(Handle(newContext(t), tradeMessage(c, "carla", "victor", 2, 9500)), mock.Err)
+		c.ErrorIs(deliver(t, tradeMessage(c, "carla", "victor", 2, 9500)), mock.Err)
 	})
 
-	t.Run("a payload that cannot be read is skipped", func(t *testing.T) {
+	t.Run("a trade that cannot be read is left out of its batch", func(t *testing.T) {
 		c := require.New(t)
 		mock := walletdb.InitMock(t)
+		mock.Balances = []models.Balance{
+			{UserID: "carla", Currency: money.BRL, Reserved: 19000},
+			{UserID: "victor", Currency: money.VIB, Reserved: 2},
+		}
+		unreadable := events.Message{ID: uuid.New(), Route: events.RouteTradeExecuted, Book: "BRL-VIB", Payload: []byte(`[`)}
+		unknownBook := tradeMessage(c, "carla", "victor", 2, 9500)
+		unknownBook.Book = "BTC-USD"
 
-		c.NoError(Handle(newContext(t), events.Message{ID: uuid.New(), Route: events.RouteTradeExecuted, Book: "BRL-VIB", Payload: []byte(`[`)}))
-		c.Empty(mock.Movements)
+		c.NoError(deliver(t, unreadable, unknownBook, tradeMessage(c, "carla", "victor", 2, 9500)))
+
+		c.Len(mock.Movements, 4)
+	})
+
+	t.Run("a batch without a readable trade writes nothing", func(t *testing.T) {
+		c := require.New(t)
+		mock := walletdb.InitMock(t)
+		mock.Err = errors.New("connection refused")
+
+		c.NoError(deliver(t, events.Message{ID: uuid.New(), Route: events.RouteTradeExecuted, Book: "BRL-VIB", Payload: []byte(`[`)}))
 	})
 }

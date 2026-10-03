@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
@@ -51,7 +50,8 @@ func readBatches[C context.Context](ctx C, client *kgo.Client, maxBatch int, log
 
 		batch := decodeBatch(fetches.Records(), logger)
 		if len(batch) > 0 {
-			retryBatch(ctx, batch, logger, applyBatch)
+			what := fmt.Sprintf("handling a batch from offset %d", batch[0].Offset)
+			retry(ctx, logger, what, func() error { return applyBatch(ctx, batch) })
 		}
 	}
 }
@@ -71,21 +71,4 @@ func decodeBatch(records []*kgo.Record, logger Logger) []Record {
 	}
 
 	return batch
-}
-
-func retryBatch[C context.Context](ctx C, batch []Record, logger Logger, applyBatch func(C, []Record) error) {
-	for {
-		err := applyBatch(ctx, batch)
-		if err == nil {
-			return
-		}
-
-		logger.Errorf("handling a batch from offset %d failed, retrying: %v", batch[0].Offset, err)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(retryDelay):
-		}
-	}
 }

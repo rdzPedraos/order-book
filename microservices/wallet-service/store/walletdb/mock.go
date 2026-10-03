@@ -191,3 +191,13 @@ func (m *Mock) applyTrade(_ *gofr.Context, trade models.Trade) error {
 
 	return nil
 }
+
+func (m *Mock) applyTrades(ctx *gofr.Context, trades []models.Trade) error {
+	for _, trade := range trades {
+		if err := m.applyTrade(ctx, trade); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

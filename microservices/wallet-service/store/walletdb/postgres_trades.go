@@ -1,54 +1,70 @@
 package walletdb
 
 import (
+	"encoding/json"
 	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"gofr.dev/pkg/gofr"
-	gofrSQL "gofr.dev/pkg/gofr/datasource/sql"
 
 	"github.com/rdzpedraos/order-book/microservices/wallet-service/models"
+	"github.com/rdzpedraos/order-book/shared/money"
 )
 
-const isTradeApplied = `
-SELECT EXISTS (SELECT 1 FROM ledger WHERE type = 'TRADE_PAID' AND message_id = $1)`
+// The rules live in apply_trade_movements (migration 20261007000000), so a
+// batch is one round trip, and one statement applies all its trades or none.
+const applyTradeMovements = `SELECT apply_trade_movements($1)`
 
-// The engine reserved the trade before it crossed; CHECK (reserved >= 0)
-// fails the transaction if that ever were not so.
-const takeReserved = `
-UPDATE balances SET reserved = reserved - $3
-WHERE user_id = $1 AND currency = $2`
+// The keys are the columns of ledger, which the function reads with
+// jsonb_populate_recordset.
+type movementRow struct {
+	ID        uuid.UUID           `json:"id"`
+	UserID    string              `json:"user_id"`
+	Currency  money.Currency      `json:"currency"`
+	Type      models.MovementType `json:"type"`
+	Amount    int64               `json:"amount,string"`
+	OrderID   *uuid.UUID          `json:"order_id"`
+	MessageID uuid.UUID           `json:"message_id"`
+	Result    models.Result       `json:"result"`
+	CreatedAt time.Time           `json:"created_at"`
+}
 
-func (postgres) applyTrade(ctx *gofr.Context, trade models.Trade) error {
-	movements, err := trade.BuildMovements()
+func (postgres) applyTrades(ctx *gofr.Context, trades []models.Trade) error {
+	encodedMovements, err := formatTradeMovements(trades)
 	if err != nil {
 		return err
 	}
 
-	return runInTransaction(ctx, func(tx *gofrSQL.Tx) error {
-		var applied bool
-		if err := tx.QueryRowContext(ctx, isTradeApplied, trade.MessageID).Scan(&applied); err != nil || applied {
-			return err
+	if _, err := ctx.SQL.ExecContext(ctx, applyTradeMovements, encodedMovements); err != nil {
+		return fmt.Errorf("apply trades: %w", err)
+	}
+
+	return nil
+}
+
+func formatTradeMovements(trades []models.Trade) (string, error) {
+	rows := make([]movementRow, 0, 4*len(trades))
+
+	for _, trade := range trades {
+		movements, err := trade.BuildMovements()
+		if err != nil {
+			return "", err
 		}
 
 		for _, movement := range movements {
-			if err := applyTradeMovement(ctx, tx, movement); err != nil {
-				return err
-			}
+			rows = append(rows, movementRow{
+				ID: movement.ID, UserID: movement.UserID, Currency: movement.Currency, Type: movement.Type,
+				Amount: movement.Amount, OrderID: movement.OrderID, MessageID: *movement.MessageID,
+				Result: movement.Result, CreatedAt: movement.CreatedAt,
+			})
 		}
-
-		return nil
-	})
-}
-
-func applyTradeMovement(ctx *gofr.Context, tx *gofrSQL.Tx, movement models.Movement) error {
-	query := addAvailable
-	if movement.Type == models.MovementTradePaid {
-		query = takeReserved
 	}
 
-	if _, err := tx.ExecContext(ctx, query, movement.UserID, movement.Currency, movement.Amount); err != nil {
-		return fmt.Errorf("apply %s: %w", movement.Type, err)
+	encodedMovements, err := json.Marshal(rows)
+	if err != nil {
+		return "", fmt.Errorf("encode trade movements: %w", err)
 	}
 
-	return insertMovementIn(ctx, tx, movement)
+	return string(encodedMovements), nil
 }

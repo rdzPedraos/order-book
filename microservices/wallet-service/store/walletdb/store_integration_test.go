@@ -331,9 +331,9 @@ func applyReleaseAndTrade(c *require.Assertions, ctx *gofr.Context, releaseFirst
 
 	if releaseFirst {
 		c.Equal(models.ResultOK, applyOne(c, ctx, release))
-		c.NoError(ApplyTrade(ctx, trade))
+		c.NoError(ApplyTrades(ctx, []models.Trade{trade}))
 	} else {
-		c.NoError(ApplyTrade(ctx, trade))
+		c.NoError(ApplyTrades(ctx, []models.Trade{trade}))
 		c.Equal(models.ResultOK, applyOne(c, ctx, release))
 	}
 
@@ -343,17 +343,37 @@ func applyReleaseAndTrade(c *require.Assertions, ctx *gofr.Context, releaseFirst
 	return balance
 }
 
+func countTradeMovements(c *require.Assertions, ctx *gofr.Context, userID string) int {
+	movements, err := ListMovements(ctx, MovementQuery{UserID: userID, Limit: 50})
+	c.NoError(err)
+
+	return len(slices.DeleteFunc(movements, func(movement models.Movement) bool {
+		return movement.Type != models.MovementTradePaid && movement.Type != models.MovementTradeReceived
+	}))
+}
+
+func sumTotals(c *require.Assertions, ctx *gofr.Context, people ...string) map[money.Currency]int64 {
+	totals := map[money.Currency]int64{}
+
+	for _, userID := range people {
+		for _, balance := range getBalancesOf(c, ctx, userID) {
+			totals[balance.Currency] += balance.Available + balance.Reserved
+		}
+	}
+
+	return totals
+}
+
 func TestApplyTradeIntegration(t *testing.T) {
 	ctx := newIntegrationContext(t)
 
-	t.Run("a repeated trade moves both sides once", func(t *testing.T) {
+	t.Run("payment of a trade", func(t *testing.T) {
 		c := require.New(t)
 		trade := newTrade(newUserID(), newUserID(), 2, 19000)
 		reserveFor(c, ctx, trade.BuyerID, money.BRL, trade.BuyOrderID, 19000)
 		reserveFor(c, ctx, trade.SellerID, money.VIB, trade.SellOrderID, 2)
 
-		c.NoError(ApplyTrade(ctx, trade))
-		c.NoError(ApplyTrade(ctx, trade))
+		c.NoError(ApplyTrades(ctx, []models.Trade{trade}))
 
 		c.Equal([]models.Balance{
 			{UserID: trade.BuyerID, Currency: money.BRL},
@@ -363,6 +383,68 @@ func TestApplyTradeIntegration(t *testing.T) {
 			{UserID: trade.SellerID, Currency: money.BRL, Available: 19000},
 			{UserID: trade.SellerID, Currency: money.VIB},
 		}, getBalancesOf(c, ctx, trade.SellerID))
+		c.Equal([]int{2, 2}, []int{countTradeMovements(c, ctx, trade.BuyerID), countTradeMovements(c, ctx, trade.SellerID)})
+	})
+
+	t.Run("a repeated trade moves both sides once", func(t *testing.T) {
+		c := require.New(t)
+		trade := newTrade(newUserID(), newUserID(), 2, 19000)
+		reserveFor(c, ctx, trade.BuyerID, money.BRL, trade.BuyOrderID, 19000)
+		reserveFor(c, ctx, trade.SellerID, money.VIB, trade.SellOrderID, 2)
+
+		c.NoError(ApplyTrades(ctx, []models.Trade{trade}))
+		c.NoError(ApplyTrades(ctx, []models.Trade{trade}))
+
+		c.Equal([]models.Balance{
+			{UserID: trade.BuyerID, Currency: money.BRL},
+			{UserID: trade.BuyerID, Currency: money.VIB, Available: 2},
+		}, getBalancesOf(c, ctx, trade.BuyerID))
+		c.Equal([]models.Balance{
+			{UserID: trade.SellerID, Currency: money.BRL, Available: 19000},
+			{UserID: trade.SellerID, Currency: money.VIB},
+		}, getBalancesOf(c, ctx, trade.SellerID))
+	})
+
+	t.Run("conservation", func(t *testing.T) {
+		c := require.New(t)
+		buyerID, sellerID := newUserID(), newUserID()
+		first, second := newTrade(buyerID, sellerID, 2, 19000), newTrade(buyerID, sellerID, 1, 9600)
+		reserveFor(c, ctx, buyerID, money.BRL, first.BuyOrderID, 28600)
+		reserveFor(c, ctx, sellerID, money.VIB, first.SellOrderID, 3)
+		before := sumTotals(c, ctx, buyerID, sellerID)
+
+		c.NoError(ApplyTrades(ctx, []models.Trade{first}))
+		c.NoError(ApplyTrades(ctx, []models.Trade{second}))
+
+		c.Equal(before, sumTotals(c, ctx, buyerID, sellerID))
+	})
+
+	t.Run("two trades of a person in one batch", func(t *testing.T) {
+		c := require.New(t)
+		buyerID := newUserID()
+		first, second := newTrade(buyerID, newUserID(), 2, 19000), newTrade(buyerID, newUserID(), 1, 9500)
+		reserveFor(c, ctx, buyerID, money.BRL, first.BuyOrderID, 28500)
+		reserveFor(c, ctx, first.SellerID, money.VIB, first.SellOrderID, 2)
+		reserveFor(c, ctx, second.SellerID, money.VIB, second.SellOrderID, 1)
+
+		c.NoError(ApplyTrades(ctx, []models.Trade{first, second}))
+
+		c.Equal([]models.Balance{
+			{UserID: buyerID, Currency: money.BRL},
+			{UserID: buyerID, Currency: money.VIB, Available: 3},
+		}, getBalancesOf(c, ctx, buyerID))
+	})
+
+	t.Run("a trade repeated within its batch is paid once", func(t *testing.T) {
+		c := require.New(t)
+		trade := newTrade(newUserID(), newUserID(), 2, 19000)
+		reserveFor(c, ctx, trade.BuyerID, money.BRL, trade.BuyOrderID, 38000)
+		reserveFor(c, ctx, trade.SellerID, money.VIB, trade.SellOrderID, 2)
+
+		c.NoError(ApplyTrades(ctx, []models.Trade{trade, trade}))
+
+		c.Equal(int64(19000), getBalancesOf(c, ctx, trade.BuyerID)[0].Reserved)
+		c.Equal(2, countTradeMovements(c, ctx, trade.BuyerID))
 	})
 
 	t.Run("the release before the trade", func(t *testing.T) {
@@ -375,5 +457,51 @@ func TestApplyTradeIntegration(t *testing.T) {
 		c := require.New(t)
 
 		c.Equal(int64(56000), applyReleaseAndTrade(c, ctx, false).Available)
+	})
+}
+
+// Funds and trades are two roles writing the same balances at the same time.
+func runBoth(applyFunds, applyTrades func() error) (error, error) {
+	var fundsErr, tradesErr error
+
+	var wg sync.WaitGroup
+	wg.Go(func() { fundsErr = applyFunds() })
+	wg.Go(func() { tradesErr = applyTrades() })
+	wg.Wait()
+
+	return fundsErr, tradesErr
+}
+
+func TestLockOrderIntegration(t *testing.T) {
+	ctx := newIntegrationContext(t)
+
+	t.Run("reservations and trades of the same people at the same time never deadlock", func(t *testing.T) {
+		c := require.New(t)
+		people := make([]string, 30)
+		for i := range people {
+			people[i] = newUserID()
+			reserveFor(c, ctx, people[i], money.BRL, uuid.New(), 500000)
+			reserveFor(c, ctx, people[i], money.VIB, uuid.New(), 500)
+			c.NoError(Deposit(ctx, deposit(people[i], money.BRL, 1000)))
+		}
+
+		for range 10 {
+			reservations := make([]models.FundsOperation, 0, len(people))
+			for i := len(people) - 1; i >= 0; i-- {
+				reservations = append(reservations, fundsOperation(models.MovementReserve, people[i], 1))
+			}
+
+			trades := make([]models.Trade, 0, len(people)-1)
+			for i := range len(people) - 1 {
+				trades = append(trades, newTrade(people[i], people[i+1], 1, 1))
+			}
+
+			fundsErr, tradesErr := runBoth(
+				func() error { _, err := ApplyFundsBatch(ctx, reservations); return err },
+				func() error { return ApplyTrades(ctx, trades) },
+			)
+			c.NoError(fundsErr)
+			c.NoError(tradesErr)
+		}
 	})
 }

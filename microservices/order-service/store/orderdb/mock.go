@@ -170,3 +170,32 @@ func isInQuery(order models.Order, query ListQuery) bool {
 		(query.Book == nil || order.Book == *query.Book) &&
 		(query.Cursor == nil || bytes.Compare(order.ID[:], query.Cursor[:]) < 0)
 }
+
+func (m *Mock) applyChanges(ctx *gofr.Context, changes []Change) error {
+	if m.Err != nil {
+		return m.Err
+	}
+
+	for _, change := range changes {
+		if err := m.applyChange(ctx, change); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *Mock) applyChange(ctx *gofr.Context, change Change) error {
+	switch change.Kind {
+	case ChangeInsert:
+		return m.insertOrder(ctx, *change.Order)
+	case ChangeFirstEvent:
+		return m.insertOrUpdateOrder(ctx, *change.Order)
+	case ChangeCancel:
+		return m.updateCancelledOrder(ctx, change.OrderID, change.Reason, change.At)
+	case ChangeModify:
+		return m.updateModifiedOrder(ctx, change.OrderID, change.Limit, change.PendingQuantity, change.At)
+	default:
+		return m.insertTrade(ctx, *change.Trade)
+	}
+}

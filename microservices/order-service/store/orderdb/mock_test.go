@@ -20,13 +20,17 @@ func ptr[T any](value T) *T {
 	return &value
 }
 
-func TestMockInsertOrder(t *testing.T) {
+func applyOne(change Change) error {
+	return ApplyChanges(&gofr.Context{}, []Change{change})
+}
+
+func TestMockInsert(t *testing.T) {
 	t.Run("order inserted twice is recorded once", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
 
-		c.NoError(InsertOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)))
-		c.NoError(InsertOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)))
+		c.NoError(applyOne(Change{Kind: ChangeInsert, Order: ptr(order(1, "user-a", models.SideBuy))}))
+		c.NoError(applyOne(Change{Kind: ChangeInsert, Order: ptr(order(1, "user-a", models.SideBuy))}))
 		c.Equal([]models.Order{order(1, "user-a", models.SideBuy)}, mock.Orders)
 	})
 
@@ -34,7 +38,7 @@ func TestMockInsertOrder(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
 
-		c.NoError(InsertOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)))
+		c.NoError(applyOne(Change{Kind: ChangeInsert, Order: ptr(order(1, "user-a", models.SideBuy))}))
 		c.Equal([]models.Order{order(1, "user-a", models.SideBuy)}, mock.Orders)
 	})
 
@@ -43,7 +47,7 @@ func TestMockInsertOrder(t *testing.T) {
 		mock := InitMock(t)
 		mock.Err = errors.New("connection refused")
 
-		c.ErrorIs(InsertOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)), mock.Err)
+		c.ErrorIs(applyOne(Change{Kind: ChangeInsert, Order: ptr(order(1, "user-a", models.SideBuy))}), mock.Err)
 		c.Empty(mock.Orders)
 	})
 }
@@ -123,13 +127,13 @@ func withStatus(stored models.Order, status models.Status) models.Order {
 	return stored
 }
 
-func TestMockInsertOrUpdateOrder(t *testing.T) {
+func TestMockFirstEvent(t *testing.T) {
 	t.Run("an order not stored yet is inserted with its status", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
 		accepted := withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen)
 
-		c.NoError(InsertOrUpdateOrder(&gofr.Context{}, accepted))
+		c.NoError(applyOne(Change{Kind: ChangeFirstEvent, Order: ptr(accepted)}))
 		c.Equal([]models.Order{accepted}, mock.Orders)
 	})
 
@@ -140,7 +144,7 @@ func TestMockInsertOrUpdateOrder(t *testing.T) {
 		rejected := withStatus(order(1, "user-a", models.SideBuy), models.StatusRejected)
 		rejected.Reason = ptr("insufficient_funds")
 
-		c.NoError(InsertOrUpdateOrder(&gofr.Context{}, rejected))
+		c.NoError(applyOne(Change{Kind: ChangeFirstEvent, Order: ptr(rejected)}))
 		c.Equal([]models.Order{rejected}, mock.Orders)
 	})
 
@@ -150,18 +154,18 @@ func TestMockInsertOrUpdateOrder(t *testing.T) {
 		filled := withStatus(order(1, "user-a", models.SideBuy), models.StatusFilled)
 		mock.Orders = []models.Order{filled}
 
-		c.NoError(InsertOrUpdateOrder(&gofr.Context{}, withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen)))
+		c.NoError(applyOne(Change{Kind: ChangeFirstEvent, Order: ptr(withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen))}))
 		c.Equal([]models.Order{filled}, mock.Orders)
 	})
 }
 
-func TestMockUpdateCancelledOrder(t *testing.T) {
+func TestMockCancel(t *testing.T) {
 	t.Run("an order not final is cancelled with its reason", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
 		mock.Orders = []models.Order{withStatus(order(1, "user-a", models.SideBuy), models.StatusOpen)}
 
-		c.NoError(UpdateCancelledOrder(&gofr.Context{}, uuid.UUID{15: 1}, ptr("no_liquidity"), time.Time{}))
+		c.NoError(applyOne(Change{Kind: ChangeCancel, OrderID: uuid.UUID{15: 1}, Reason: ptr("no_liquidity"), At: time.Time{}}))
 		c.Equal(models.StatusCancelled, mock.Orders[0].Status)
 		c.Equal(ptr("no_liquidity"), mock.Orders[0].Reason)
 	})
@@ -172,12 +176,12 @@ func TestMockUpdateCancelledOrder(t *testing.T) {
 		filled := withStatus(order(1, "user-a", models.SideBuy), models.StatusFilled)
 		mock.Orders = []models.Order{filled}
 
-		c.NoError(UpdateCancelledOrder(&gofr.Context{}, uuid.UUID{15: 1}, nil, time.Time{}))
+		c.NoError(applyOne(Change{Kind: ChangeCancel, OrderID: uuid.UUID{15: 1}, Reason: nil, At: time.Time{}}))
 		c.Equal([]models.Order{filled}, mock.Orders)
 	})
 }
 
-func TestMockUpdateModifiedOrder(t *testing.T) {
+func TestMockModify(t *testing.T) {
 	t.Run("the quantity is what was executed plus what is pending", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
@@ -185,7 +189,7 @@ func TestMockUpdateModifiedOrder(t *testing.T) {
 		partial.FilledQuantity = 4
 		mock.Orders = []models.Order{partial}
 
-		c.NoError(UpdateModifiedOrder(&gofr.Context{}, uuid.UUID{15: 1}, 9200, 2, time.Time{}))
+		c.NoError(applyOne(Change{Kind: ChangeModify, OrderID: uuid.UUID{15: 1}, Limit: 9200, PendingQuantity: 2, At: time.Time{}}))
 		c.Equal(ptr(int64(9200)), mock.Orders[0].Limit)
 		c.Equal(ptr(int64(6)), mock.Orders[0].Quantity)
 	})
@@ -196,7 +200,7 @@ func TestMockUpdateModifiedOrder(t *testing.T) {
 		cancelled := withStatus(order(1, "user-a", models.SideBuy), models.StatusCancelled)
 		mock.Orders = []models.Order{cancelled}
 
-		c.NoError(UpdateModifiedOrder(&gofr.Context{}, uuid.UUID{15: 1}, 9200, 2, time.Time{}))
+		c.NoError(applyOne(Change{Kind: ChangeModify, OrderID: uuid.UUID{15: 1}, Limit: 9200, PendingQuantity: 2, At: time.Time{}}))
 		c.Equal([]models.Order{cancelled}, mock.Orders)
 	})
 
@@ -205,13 +209,13 @@ func TestMockUpdateModifiedOrder(t *testing.T) {
 		mock := InitMock(t)
 		mock.Err = errors.New("connection refused")
 
-		c.ErrorIs(InsertOrUpdateOrder(&gofr.Context{}, order(1, "user-a", models.SideBuy)), mock.Err)
-		c.ErrorIs(UpdateCancelledOrder(&gofr.Context{}, uuid.UUID{15: 1}, nil, time.Time{}), mock.Err)
-		c.ErrorIs(UpdateModifiedOrder(&gofr.Context{}, uuid.UUID{15: 1}, 9200, 2, time.Time{}), mock.Err)
+		c.ErrorIs(applyOne(Change{Kind: ChangeFirstEvent, Order: ptr(order(1, "user-a", models.SideBuy))}), mock.Err)
+		c.ErrorIs(applyOne(Change{Kind: ChangeCancel, OrderID: uuid.UUID{15: 1}, Reason: nil, At: time.Time{}}), mock.Err)
+		c.ErrorIs(applyOne(Change{Kind: ChangeModify, OrderID: uuid.UUID{15: 1}, Limit: 9200, PendingQuantity: 2, At: time.Time{}}), mock.Err)
 	})
 }
 
-func TestMockInsertTrade(t *testing.T) {
+func TestMockTrade(t *testing.T) {
 	t.Run("a trade adds to both orders once", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
@@ -220,8 +224,8 @@ func TestMockInsertTrade(t *testing.T) {
 		mock.Orders = []models.Order{buy, sell}
 		trade := models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Price: 9000, Quantity: 4, Amount: 36000}
 
-		c.NoError(InsertTrade(&gofr.Context{}, trade))
-		c.NoError(InsertTrade(&gofr.Context{}, trade))
+		c.NoError(applyOne(Change{Kind: ChangeTrade, Trade: ptr(trade)}))
+		c.NoError(applyOne(Change{Kind: ChangeTrade, Trade: ptr(trade)}))
 
 		c.Equal([]models.Trade{trade}, mock.Trades)
 		c.Equal([]any{models.StatusPartiallyFilled, int64(4), int64(36000)}, []any{mock.Orders[0].Status, mock.Orders[0].FilledQuantity, mock.Orders[0].FilledAmount})
@@ -233,6 +237,42 @@ func TestMockInsertTrade(t *testing.T) {
 		mock := InitMock(t)
 		mock.Err = errors.New("connection refused")
 
-		c.ErrorIs(InsertTrade(&gofr.Context{}, models.Trade{}), mock.Err)
+		c.ErrorIs(applyOne(Change{Kind: ChangeTrade, Trade: ptr(models.Trade{})}), mock.Err)
+	})
+}
+
+func TestMockApplyChanges(t *testing.T) {
+	t.Run("each change is applied as its store function does", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		buy, sell := order(1, "user-a", models.SideBuy), order(2, "user-b", models.SideSell)
+		buy.Type, buy.Limit, buy.Quantity = models.TypeLimit, ptr(int64(9000)), ptr(int64(10))
+		sell.Type, sell.Limit, sell.Quantity = models.TypeLimit, ptr(int64(9000)), ptr(int64(4))
+		accepted := buy
+		accepted.Status = models.StatusOpen
+		reason := "no_liquidity"
+
+		c.NoError(ApplyChanges(&gofr.Context{}, []Change{
+			{Kind: ChangeInsert, Order: &buy},
+			{Kind: ChangeInsert, Order: &sell},
+			{Kind: ChangeFirstEvent, Order: &accepted},
+			{Kind: ChangeModify, OrderID: buy.ID, Limit: 9100, PendingQuantity: 8},
+			{Kind: ChangeTrade, Trade: &models.Trade{ID: uuid.New(), BuyOrderID: buy.ID, SellOrderID: sell.ID, Quantity: 4, Amount: 36000}},
+			{Kind: ChangeCancel, OrderID: buy.ID, Reason: &reason},
+		}))
+
+		c.Equal([]any{models.StatusCancelled, int64(9100), int64(8), int64(4), &reason},
+			[]any{mock.Orders[0].Status, *mock.Orders[0].Limit, *mock.Orders[0].Quantity, mock.Orders[0].FilledQuantity, mock.Orders[0].Reason})
+		c.Equal(models.StatusFilled, mock.Orders[1].Status)
+	})
+
+	t.Run("an unavailable database applies nothing", func(t *testing.T) {
+		c := require.New(t)
+		mock := InitMock(t)
+		mock.Err = errors.New("connection refused")
+		pending := order(1, "user-a", models.SideBuy)
+
+		c.ErrorIs(ApplyChanges(&gofr.Context{}, []Change{{Kind: ChangeInsert, Order: &pending}}), mock.Err)
+		c.Empty(mock.Orders)
 	})
 }

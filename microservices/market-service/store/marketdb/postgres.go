@@ -1,6 +1,7 @@
 package marketdb
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"gofr.dev/pkg/gofr"
@@ -8,13 +9,19 @@ import (
 	"github.com/rdzpedraos/order-book/microservices/market-service/models"
 )
 
-const upsertLevel = `
+// Each level appears once, so the upsert never touches a row twice, and goes
+// to the delete when it emptied or to the upsert otherwise.
+const updateLevels = `
+WITH changes AS (
+	SELECT * FROM jsonb_to_recordset($1) AS c(book text, side text, price bigint, volume bigint, orders int)
+),
+emptied AS (
+	DELETE FROM levels USING changes
+	WHERE changes.volume = 0 AND levels.book = changes.book AND levels.side = changes.side AND levels.price = changes.price
+)
 INSERT INTO levels (book, side, price, volume, orders)
-VALUES ($1, $2, $3, $4, $5)
+SELECT book, side, price, volume, orders FROM changes WHERE volume > 0
 ON CONFLICT (book, side, price) DO UPDATE SET volume = EXCLUDED.volume, orders = EXCLUDED.orders`
-
-const deleteLevel = `
-DELETE FROM levels WHERE book = $1 AND side = $2 AND price = $3`
 
 const listBids = `
 SELECT price, volume, orders FROM levels
@@ -28,19 +35,48 @@ WHERE book = $1 AND side = 'SELL'
 ORDER BY price ASC
 LIMIT $2`
 
-func (postgres) updateLevel(ctx *gofr.Context, level models.Level) error {
-	var err error
-	if level.Volume == 0 {
-		_, err = ctx.SQL.ExecContext(ctx, deleteLevel, level.Book, level.Side, level.Price)
-	} else {
-		_, err = ctx.SQL.ExecContext(ctx, upsertLevel, level.Book, level.Side, level.Price, level.Volume, level.Orders)
+type levelRow struct {
+	Book   string `json:"book"`
+	Side   string `json:"side"`
+	Price  int64  `json:"price,string"`
+	Volume int64  `json:"volume,string"`
+	Orders int    `json:"orders"`
+}
+
+func (postgres) updateLevels(ctx *gofr.Context, levels []models.Level) error {
+	encodedLevels, err := json.Marshal(buildLastLevelRows(levels))
+	if err != nil {
+		return fmt.Errorf("encode levels: %w", err)
 	}
 
-	if err != nil {
-		return fmt.Errorf("update level: %w", err)
+	if _, err := ctx.SQL.ExecContext(ctx, updateLevels, string(encodedLevels)); err != nil {
+		return fmt.Errorf("update levels: %w", err)
 	}
 
 	return nil
+}
+
+// Each event carries the whole state of its level, so only the last one of
+// each level in the batch matters.
+func buildLastLevelRows(levels []models.Level) []levelRow {
+	rows := make([]levelRow, 0, len(levels))
+	positions := make(map[levelRow]int, len(levels))
+
+	for _, level := range levels {
+		key := levelRow{Book: level.Book, Side: level.Side, Price: level.Price}
+		row := levelRow{Book: level.Book, Side: level.Side, Price: level.Price, Volume: level.Volume, Orders: level.Orders}
+
+		if position, seen := positions[key]; seen {
+			rows[position] = row
+
+			continue
+		}
+
+		positions[key] = len(rows)
+		rows = append(rows, row)
+	}
+
+	return rows
 }
 
 func (postgres) listLevels(ctx *gofr.Context, book, side string, depth int) ([]models.Level, error) {

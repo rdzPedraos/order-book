@@ -32,28 +32,74 @@ func newIntegrationContext(t *testing.T) *gofr.Context {
 	return &gofr.Context{Context: context.Background(), Container: db}
 }
 
+func newBook() string {
+	return "TEST-" + uuid.NewString()[:8]
+}
+
+func bid(book string, price, volume int64, orders int) models.Level {
+	return models.Level{Book: book, Side: "BUY", Price: price, Volume: volume, Orders: orders}
+}
+
+func listStoredBids(c *require.Assertions, ctx *gofr.Context, book string) []models.Level {
+	bids, err := ListLevels(ctx, book, "BUY", 20)
+	c.NoError(err)
+
+	return bids
+}
+
 func TestLevelsIntegration(t *testing.T) {
 	ctx := newIntegrationContext(t)
 
-	t.Run("levels are written, changed, emptied and read best first", func(t *testing.T) {
+	t.Run("a new level and one that changes are read best first", func(t *testing.T) {
 		c := require.New(t)
-		book := "TEST-" + uuid.NewString()[:8]
-		bid := func(price, volume int64, orders int) models.Level {
-			return models.Level{Book: book, Side: "BUY", Price: price, Volume: volume, Orders: orders}
-		}
+		book := newBook()
 
-		c.NoError(UpdateLevel(ctx, bid(9900, 15, 1)))
-		c.NoError(UpdateLevel(ctx, bid(10000, 10, 1)))
-		c.NoError(UpdateLevel(ctx, bid(10000, 30, 2)))
-		c.NoError(UpdateLevel(ctx, bid(9800, 1, 1)))
-		c.NoError(UpdateLevel(ctx, bid(9800, 0, 0)))
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9900, 15, 1), bid(book, 10000, 10, 1)}))
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 10000, 30, 2)}))
 
-		bids, err := ListLevels(ctx, book, "BUY", 20)
-		c.NoError(err)
-		c.Equal([]models.Level{bid(10000, 30, 2), bid(9900, 15, 1)}, bids)
+		c.Equal([]models.Level{bid(book, 10000, 30, 2), bid(book, 9900, 15, 1)}, listStoredBids(c, ctx, book))
 
 		asks, err := ListLevels(ctx, book, "SELL", 20)
 		c.NoError(err)
 		c.Empty(asks)
+	})
+
+	t.Run("emptied level", func(t *testing.T) {
+		c := require.New(t)
+		book := newBook()
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9800, 1, 1)}))
+
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9800, 0, 0)}))
+
+		c.Empty(listStoredBids(c, ctx, book))
+	})
+
+	t.Run("a repeated event writes the same level", func(t *testing.T) {
+		c := require.New(t)
+		book := newBook()
+
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9800, 3, 1)}))
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9800, 3, 1)}))
+
+		c.Equal([]models.Level{bid(book, 9800, 3, 1)}, listStoredBids(c, ctx, book))
+	})
+
+	t.Run("a level that changes twice in a batch keeps its last state", func(t *testing.T) {
+		c := require.New(t)
+		book := newBook()
+
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9700, 1, 1), bid(book, 9700, 6, 3), bid(book, 9700, 4, 2)}))
+
+		c.Equal([]models.Level{bid(book, 9700, 4, 2)}, listStoredBids(c, ctx, book))
+	})
+
+	t.Run("a level emptied within its batch is deleted", func(t *testing.T) {
+		c := require.New(t)
+		book := newBook()
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9600, 2, 1)}))
+
+		c.NoError(UpdateLevels(ctx, []models.Level{bid(book, 9600, 5, 2), bid(book, 9600, 0, 0), bid(book, 9500, 1, 1)}))
+
+		c.Equal([]models.Level{bid(book, 9500, 1, 1)}, listStoredBids(c, ctx, book))
 	})
 }

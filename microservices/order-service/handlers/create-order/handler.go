@@ -49,8 +49,8 @@ func Handle(ctx *gofr.Context) (any, error) {
 	return order, nil
 }
 
-// The order exists once its NewOrder is in the log; the insert-new-order
-// subscriber stores it in orders afterwards.
+// The order exists once its NewOrder is in the log; the projector stores it
+// in orders afterwards.
 func publishNewOrder(ctx *gofr.Context, order models.Order) error {
 	message, err := events.NewMessage(events.RouteNewOrder, order.Book, order.CreatedAt, events.NewOrder{
 		OrderID:  order.ID,

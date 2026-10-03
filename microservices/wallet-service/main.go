@@ -16,14 +16,13 @@ import (
 	"gofr.dev/pkg/gofr"
 
 	applyfundsbatch "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/apply-funds-batch"
-	applytrade "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/apply-trade"
+	applytrades "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/apply-trades"
 	createdeposit "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/create-deposit"
 	createwithdrawal "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/create-withdrawal"
 	getwallet "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/get-wallet"
 	listmovements "github.com/rdzpedraos/order-book/microservices/wallet-service/handlers/list-movements"
 	"github.com/rdzpedraos/order-book/microservices/wallet-service/migrations"
 	"github.com/rdzpedraos/order-book/shared/eventlog/consumer"
-	"github.com/rdzpedraos/order-book/shared/eventlog/events"
 	"github.com/rdzpedraos/order-book/shared/identity"
 )
 
@@ -64,13 +63,15 @@ func serveFunds(app *gofr.App) {
 	app.POST("/wallet/internal/funds:batch", applyfundsbatch.Handle)
 }
 
+// The most trades the trades role pays at once, as the engine does.
+const tradeBatch = 500
+
 // The hook's context ends with the app, which stops the consumer.
 func runTradeConsumer(app *gofr.App) {
 	brokers := strings.Split(app.Config.Get("EVENT_LOG_BROKERS"), ",")
 
 	app.OnStart(func(ctx *gofr.Context) error {
-		return consumer.Start(ctx, brokers, app.Config.Get("EVENT_LOG_GROUP"), ctx.Logger,
-			consumer.Subscribe(events.RouteTradeExecuted, applytrade.Handle),
-		)
+		return consumer.StartGroup(ctx, brokers, app.Config.Get("EVENT_LOG_GROUP"), applytrades.Routes,
+			tradeBatch, ctx.Logger, applytrades.Handle)
 	})
 }

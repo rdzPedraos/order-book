@@ -2,6 +2,8 @@ package marketdb
 
 import (
 	"context"
+	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -24,29 +26,48 @@ func newSQLMockContext(t *testing.T) (*gofr.Context, *container.Mocks) {
 	return &gofr.Context{Context: context.Background(), Container: mockContainer}, mocks
 }
 
-func TestPostgresUpdateLevel(t *testing.T) {
-	t.Run("a level with volume is written", func(t *testing.T) {
+type encodedLevels []models.Level
+
+func (expected encodedLevels) Match(value driver.Value) bool {
+	encoded, isString := value.(string)
+	if !isString {
+		return false
+	}
+
+	var rows []levelRow
+	if err := json.Unmarshal([]byte(encoded), &rows); err != nil || len(rows) != len(expected) {
+		return false
+	}
+
+	for position, row := range rows {
+		level := expected[position]
+		if row != (levelRow{Book: level.Book, Side: level.Side, Price: level.Price, Volume: level.Volume, Orders: level.Orders}) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func TestPostgresUpdateLevels(t *testing.T) {
+	t.Run("a batch is one query with the last state of each level", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectExec(upsertLevel).WithArgs("BRL-VIB", "BUY", int64(10000), int64(30), 2).WillReturnResult(sqlmock.NewResult(0, 1))
+		mocks.SQL.ExpectExec(updateLevels).
+			WithArgs(encodedLevels{level("BUY", 10000, 30, 2), level("SELL", 10100, 0, 0)}).
+			WillReturnResult(sqlmock.NewResult(0, 2))
 
-		c.NoError(postgres{}.updateLevel(ctx, level("BUY", 10000, 30, 2)))
-	})
-
-	t.Run("an emptied level is deleted", func(t *testing.T) {
-		c := require.New(t)
-		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectExec(deleteLevel).WithArgs("BRL-VIB", "BUY", int64(10000)).WillReturnResult(sqlmock.NewResult(0, 1))
-
-		c.NoError(postgres{}.updateLevel(ctx, level("BUY", 10000, 0, 0)))
+		c.NoError(postgres{}.updateLevels(ctx, []models.Level{
+			level("BUY", 10000, 10, 1), level("SELL", 10100, 5, 1), level("BUY", 10000, 30, 2), level("SELL", 10100, 0, 0),
+		}))
 	})
 
 	t.Run("an unavailable database", func(t *testing.T) {
 		c := require.New(t)
 		ctx, mocks := newSQLMockContext(t)
-		mocks.SQL.ExpectExec(upsertLevel).WillReturnError(errors.New("connection refused"))
+		mocks.SQL.ExpectExec(updateLevels).WillReturnError(errors.New("connection refused"))
 
-		c.ErrorContains(postgres{}.updateLevel(ctx, level("BUY", 10000, 30, 2)), "update level")
+		c.ErrorContains(postgres{}.updateLevels(ctx, []models.Level{level("BUY", 10000, 30, 2)}), "update levels")
 	})
 }
 

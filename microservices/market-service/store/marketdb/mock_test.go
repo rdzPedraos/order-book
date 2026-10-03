@@ -14,16 +14,15 @@ func level(side string, price, volume int64, orders int) models.Level {
 	return models.Level{Book: "BRL-VIB", Side: side, Price: price, Volume: volume, Orders: orders}
 }
 
-func TestMockUpdateLevel(t *testing.T) {
+func TestMockUpdateLevels(t *testing.T) {
 	t.Run("a new level, a change and an emptied level", func(t *testing.T) {
 		c := require.New(t)
 		mock := InitMock(t)
 
-		c.NoError(UpdateLevel(&gofr.Context{}, level("BUY", 10000, 10, 1)))
-		c.NoError(UpdateLevel(&gofr.Context{}, level("BUY", 10000, 30, 2)))
+		c.NoError(UpdateLevels(&gofr.Context{}, []models.Level{level("BUY", 10000, 10, 1), level("BUY", 10000, 30, 2)}))
 		c.Equal([]models.Level{level("BUY", 10000, 30, 2)}, mock.Levels)
 
-		c.NoError(UpdateLevel(&gofr.Context{}, level("BUY", 10000, 0, 0)))
+		c.NoError(UpdateLevels(&gofr.Context{}, []models.Level{level("BUY", 10000, 0, 0)}))
 		c.Empty(mock.Levels)
 	})
 
@@ -32,7 +31,7 @@ func TestMockUpdateLevel(t *testing.T) {
 		mock := InitMock(t)
 		mock.Err = errors.New("connection refused")
 
-		c.ErrorIs(UpdateLevel(&gofr.Context{}, level("BUY", 10000, 10, 1)), mock.Err)
+		c.ErrorIs(UpdateLevels(&gofr.Context{}, []models.Level{level("BUY", 10000, 10, 1)}), mock.Err)
 		_, err := ListLevels(&gofr.Context{}, "BRL-VIB", "BUY", 20)
 		c.ErrorIs(err, mock.Err)
 	})
